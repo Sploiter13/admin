@@ -13,9 +13,11 @@ local function toggleForcefield(enable: boolean)
                 if localPlayer and localPlayer.Character then
                     local humanoidRootPart = localPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if humanoidRootPart then
+                        -- Track current position
                         local pos = humanoidRootPart.Position
                         local ori = humanoidRootPart.CFrame - pos
                         
+                        -- Wait for ForceField
                         local forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
                         if forceField then
                             while forceField and State.ff.enabled do
@@ -39,6 +41,7 @@ local function toggleForcefield(enable: boolean)
                                 teamEvent:FireServer(Config.FF.TEAMS.BLUE)
                                 task.wait(0.3)
                                 
+                                -- Restore position
                                 for i = 1, 5 do
                                     if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
                                         localPlayer.Character:MoveTo(pos)
