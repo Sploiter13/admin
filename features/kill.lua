@@ -151,5 +151,5 @@ local function toggleKill(enable: boolean, loop: boolean)
 end
 
 return {
-    toggle = toggleKill
+    toggleKill = toggleKill
 }

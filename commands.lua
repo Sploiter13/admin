@@ -61,8 +61,8 @@ local Commands = {
     kill = {
         description = "Kill a target player. Usage: /kill [playerName]",
         execute = function(args)
-            if Features.Kill and Features.Kill.killTargets then
-                Features.Kill.killTargets(args, false)
+            if Features.Kill and Features.Kill.toggleKill then
+                Features.Kill.toggleKill(args, false)
             else
                 Errors.notify("Error", "Kill module not available")
             end
@@ -89,8 +89,8 @@ local Commands = {
     invis = {
         description = "Enable Invisibility.",
         execute = function()
-            if Features.Invisibility and Features.Invisibility.toggle then
-                Features.Invisibility.toggle(true)
+            if Features.Invisibility and Features.Invisibility.toggleInvisibility then
+                Features.Invisibility.toggleInvisibility(true)
             else
                 Errors.notify("Error", "Invisibility module not available")
             end
