@@ -63,7 +63,7 @@ local function initializeScript()
         Forcefield = "forcefield.lua",
         Kill = "kill.lua",
         KillAura = "killaura.lua",
-        Invisibility = "invisibilty.lua",
+        Invisibility = "invisibility.lua",
         View = "view.lua",
         Goto = "goto.lua"
     }
