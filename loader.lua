@@ -42,4 +42,8 @@ local function initializeScript()
 end
 
 -- Execute
+<<<<<<< HEAD
 initializeScript()
+=======
+initializeScript()
+>>>>>>> 034caf7470466784342b93125f41ad2e72c01e2a
