@@ -61,8 +61,8 @@ local Commands = {
     kill = {
         description = "Kill a target player. Usage: /kill [playerName]",
         execute = function(args)
-            if Features.Kill and Features.Kill.toggleKill then
-                Features.Kill.toggleKill(args, false)
+            if Features.Kill and Features.Kill.killTargets then
+                Features.Kill.killTargets(args, false)
             else
                 Errors.notify("Error", "Kill module not available")
             end

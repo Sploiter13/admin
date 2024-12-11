@@ -22,134 +22,115 @@ local Errors = assert(loadModuleSafe("errors.lua"), "Failed to load Errors")
 local Utils = assert(loadModuleSafe("utils.lua"), "Failed to load Utils")
 local State = loadModuleSafe("state.lua") or {}
 
--- Initialize State.kill if not present
+-- Initialize State
 State.kill = State.kill or {
     enabled = false,
     mainLoop = nil
 }
 
--- Reference ReplicatedStorage meleeEvent
+-- Get melee event reference
 local meleeEvent = Services.ReplicatedStorage:FindFirstChild("meleeEvent")
 if not meleeEvent then
     Errors.handleError(Errors.Types.EVENT, "meleeEvent not found in ReplicatedStorage")
 end
 
--- Toggle Kill feature
-local function toggleKill(enable: boolean, loop: boolean)
-    State.kill.enabled = enable
+local function killTargets(targetType: string, loop: boolean)
+    local success, err = pcall(function()
+        local targets = Utils.getTargets(targetType)
+        if #targets == 0 then
+            return Errors.handleError(Errors.Types.COMMAND, "No valid targets found", targetType)
+        end
 
-    if enable then
-        Errors.notify("Kill", "Kill feature enabled.")
-        
+        local localPlayer = Services.Players.LocalPlayer
+        if not localPlayer or not localPlayer.Character then
+            return Errors.handleError(Errors.Types.CHARACTER, "Local character not found")
+        end
+
+        local localRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not localRoot then
+            return Errors.handleError(Errors.Types.CHARACTER, "Local HumanoidRootPart not found")
+        end
+
+        -- Store original position
+        local originalCFrame = localRoot.CFrame
+
         if loop then
-            -- Start continuous kill attempts with looping
+            State.kill.enabled = true
             State.kill.mainLoop = task.spawn(function()
                 while State.kill.enabled do
-                    local targets = Utils.getTargets("others") -- Assuming getTargets can fetch all other players
                     for _, target in ipairs(targets) do
-                        if not target.Character then
-                            Errors.debugLog("Kill", "Target character not found for " .. target.Name)
-                            continue
-                        end
+                        if not target.Character then continue end
 
                         local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
                         local humanoid = target.Character:FindFirstChild("Humanoid")
-
+                        
                         if targetRoot and humanoid and humanoid.Health > 0 then
-                            local localPlayer = Services.Players.LocalPlayer
-                            local localCharacter = localPlayer.Character
-                            
-                            if not localCharacter then
-                                Errors.handleError(Errors.Types.CHARACTER, "Local character not found")
-                                continue
-                            end
-
-                            local localRoot = localCharacter:FindFirstChild("HumanoidRootPart")
-                            if not localRoot then
-                                Errors.handleError(Errors.Types.POSITION, "Local HumanoidRootPart not found")
-                                continue
-                            end
-
-                            -- Continuous kill attempts with instant teleports
+                            local attempts = 0
                             local startTime = tick()
-                            while humanoid.Health > 0 and (tick() - startTime) < Config.KILL.FF_WAIT do
-                                if not target.Character:FindFirstChildOfClass("ForceField") then
-                                    -- Predict target movement and teleport
-                                    local targetVelocity = targetRoot.Velocity
-                                    local predictedCFrame = targetRoot.CFrame + targetVelocity * 0.1
-                                    local teleportCFrame = predictedCFrame * CFrame.new(0, 0, 2)
-                                    
-                                    -- Teleport local player to the predicted position
-                                    localRoot.CFrame = teleportCFrame
-                                    
-                                    -- Fire the melee event to attack the target
-                                    meleeEvent:FireServer(target)
-
-                                    Errors.debugLog("Kill", "Attacked player: " .. target.Name)
+                            
+                            while humanoid.Health > 0 and attempts < Config.KILL.MAX_ATTEMPTS do
+                                if target.Character:FindFirstChildOfClass("ForceField") then
+                                    local ffWaitStart = tick()
+                                    while target.Character:FindFirstChildOfClass("ForceField") and 
+                                          (tick() - ffWaitStart) < Config.KILL.FF_WAIT do
+                                        task.wait(0.1)
+                                    end
                                 end
-                                task.wait(0.03) -- Reduced wait time for faster updates
+                                
+                                if not target.Character:FindFirstChildOfClass("ForceField") then
+                                    localRoot.CFrame = targetRoot.CFrame * CFrame.new(Config.KILL.OFFSET)
+                                    meleeEvent:FireServer(target)
+                                    attempts += 1
+                                end
+                                
+                                task.wait(Config.KILL.RETRY_DELAY)
+                            end
+                            
+                            if humanoid.Health <= 0 then
+                                Errors.notify("Kill", "Successfully killed " .. target.Name)
                             end
                         end
                     end
-                    task.wait(Config.KILL.INTERVAL) -- Configurable interval between kill cycles
+                    task.wait(Config.KILL.INTERVAL)
                 end
             end)
+            Errors.notify("Kill", "Started loop targeting " .. targetType)
         else
-            -- Single kill with aggressive tracking
-            local targets = Utils.getTargets("others")
             for _, target in ipairs(targets) do
-                if not target.Character then
-                    Errors.debugLog("Kill", "Target character not found for " .. target.Name)
-                    continue
-                end
-
-                local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-                local humanoid = target.Character:FindFirstChild("Humanoid")
-
-                if targetRoot and humanoid and humanoid.Health > 0 then
-                    local localPlayer = Services.Players.LocalPlayer
-                    local localCharacter = localPlayer.Character
-                            
-                    if not localCharacter then
-                        Errors.handleError(Errors.Types.CHARACTER, "Local character not found")
-                        continue
-                    end
-
-                    local localRoot = localCharacter:FindFirstChild("HumanoidRootPart")
-                    if not localRoot then
-                        Errors.handleError(Errors.Types.POSITION, "Local HumanoidRootPart not found")
-                        continue
-                    end
-
-                    -- Aggressive kill attempt with instant teleport
-                    if not target.Character:FindFirstChildOfClass("ForceField") then
-                        -- Predict target movement and teleport
-                        local targetVelocity = targetRoot.Velocity
-                        local predictedCFrame = targetRoot.CFrame + targetVelocity * 0.1
-                        local teleportCFrame = predictedCFrame * CFrame.new(0, 0, 2)
+                if target.Character then
+                    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+                    local humanoid = target.Character:FindFirstChild("Humanoid")
+                    
+                    if targetRoot and humanoid and humanoid.Health > 0 then
+                        local startTime = tick()
                         
-                        -- Teleport local player to the predicted position
-                        localRoot.CFrame = teleportCFrame
+                        while humanoid.Health > 0 and (tick() - startTime) < Config.KILL.TIMEOUT do
+                            if not target.Character:FindFirstChildOfClass("ForceField") then
+                                localRoot.CFrame = targetRoot.CFrame * CFrame.new(Config.KILL.OFFSET)
+                                meleeEvent:FireServer(target)
+                            end
+                            task.wait(0.1)
+                        end
                         
-                        -- Fire the melee event to attack the target
-                        meleeEvent:FireServer(target)
-
-                        Errors.debugLog("Kill", "Attacked player: " .. target.Name)
-                        task.wait(0.03) -- Short wait before next kill attempt
+                        -- Return to original position
+                        localRoot.CFrame = originalCFrame
+                        
+                        if humanoid.Health <= 0 then
+                            Errors.notify("Kill", "Successfully killed " .. target.Name)
+                        else
+                            Errors.notify("Kill", "Failed to kill " .. target.Name)
+                        end
                     end
                 end
             end
         end
-    else
-        -- Disable Kill feature
-        if State.kill.mainLoop then
-            task.cancel(State.kill.mainLoop)
-            State.kill.mainLoop = nil
-            Errors.notify("Kill", "Kill feature disabled.")
-        end
+    end)
+
+    if not success then
+        Errors.handleError(Errors.Types.COMMAND, "Failed to execute kill command", err)
     end
 end
 
 return {
-    toggleKill = toggleKill
+    killTargets = killTargets
 }
