@@ -99,8 +99,8 @@ local Commands = {
     visible = {
         description = "Disable Invisibility.",
         execute = function()
-            if Features.Invisibility and Features.Invisibility.toggle then
-                Features.Invisibility.toggle(false)
+            if Features.Invisibility and Features.Invisibility.toggleInvisibility then
+                Features.Invisibility.toggleInvisibility(false)
             end
         end,
     },
