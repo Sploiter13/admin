@@ -1,15 +1,18 @@
-local Services = require("services")
-local Config = require("config")
-local Errors = require("errors")
-local Utils = require("utils")
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
+local Utils = loadstring(game:HttpGet(BASE_URL .. "utils.lua"))()
 
 -- Feature modules
-local Forcefield = require("features/forcefield")
-local Kill = require("features/kill")
-local KillAura = require("features/killaura")
-local Invisibility = require("features/invisibility")
-local View = require("features/view")
-local Goto = require("features/goto")
+local Forcefield = loadstring(game:HttpGet(BASE_URL .. "features/forcefield.lua"))()
+local Kill = loadstring(game:HttpGet(BASE_URL .. "features/kill.lua"))()
+local KillAura = loadstring(game:HttpGet(BASE_URL .. "features/killaura.lua"))()
+local Invisibility = loadstring(game:HttpGet(BASE_URL .. "features/invisibility.lua"))()
+local View = loadstring(game:HttpGet(BASE_URL .. "features/view.lua"))()
+local Goto = loadstring(game:HttpGet(BASE_URL .. "features/goto.lua"))()
+
+-- Rest of commands.lua code...
 
 local function handleCommand(message: string)
     local cmd = message:lower()

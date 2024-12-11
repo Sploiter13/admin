@@ -1,6 +1,7 @@
-local Services = require("services")
-local Config = require("config")
-local Errors = require("errors")
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
 
 local function toggleInvisibility(enable: boolean)
     if enable and not State.invis.enabled then
@@ -13,7 +14,6 @@ local function toggleInvisibility(enable: boolean)
             local hrp = character:WaitForChild("HumanoidRootPart")
             State.invis.savedPosition = hrp.Position
             
-            -- Create invisible platform
             State.invis.platform = Instance.new("Part")
             State.invis.platform.Size = Config.INVIS.PLATFORM_SIZE
             State.invis.platform.Position = Vector3.new(0, Config.INVIS.PLATFORM_HEIGHT, 0)
@@ -22,12 +22,10 @@ local function toggleInvisibility(enable: boolean)
             State.invis.platform.Transparency = 1
             State.invis.platform.Parent = workspace
             
-            -- Handle character touching platform
             local touched = false
             State.invis.platform.Touched:Connect(function(hit)
                 if not touched and hit.Parent == character then
                     touched = true
-                    
                     task.spawn(function()
                         local clone = hrp:Clone()
                         task.wait(Config.INVIS.TELEPORT_DELAY)
@@ -53,7 +51,6 @@ local function toggleInvisibility(enable: boolean)
             Errors.handleError(Errors.Types.CHARACTER, "Failed to enable invisibility", err)
         end
     elseif not enable and State.invis.enabled then
-        -- Disable invisibility
         local success, err = pcall(function()
             local player = Services.Players.LocalPlayer
             local position = State.invis.savedPosition

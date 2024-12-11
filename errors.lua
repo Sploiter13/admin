@@ -1,5 +1,8 @@
-local Services = require("services")
-local Config = require("config") 
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
+
+-- Rest of errors.lua code...
 
 -- Error type definitions
 local ErrorTypes = {

@@ -1,7 +1,8 @@
-local Services = require("services")
-local Config = require("config")
-local Errors = require("errors")
-local Utils = require("utils")
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
+local Utils = loadstring(game:HttpGet(BASE_URL .. "utils.lua"))()
 
 local function toggleKillAura(enable: boolean)
     State.aura.enabled = enable

@@ -1,10 +1,11 @@
-local Services = require("services")
-local Config = require("config")
-local Errors = require("errors")
-local Utils = require("utils")
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
+local Utils = loadstring(game:HttpGet(BASE_URL .. "utils.lua"))()
 
 local function getAK47()
-    return pcall(function()
+    local success, err = pcall(function()
         local localPlayer = Services.Players.LocalPlayer
         if not localPlayer.Character then return end
 
@@ -25,9 +26,15 @@ local function getAK47()
                 ak47.Parent = localPlayer.Character
                 return true
             end
+            
             task.wait(0.1)
         end
     end)
+    
+    if not success then
+        Errors.handleError(Errors.Types.CHARACTER, "Failed to get AK-47", err)
+        return nil
+    end
 end
 
 local function killTargets(targetType: string, loop: boolean)
@@ -66,7 +73,6 @@ local function killTargets(targetType: string, loop: boolean)
                 end
             end)
         else
-            -- Single kill logic
             for _, target in ipairs(targets) do
                 if target.Character then
                     local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
@@ -85,6 +91,10 @@ local function killTargets(targetType: string, loop: boolean)
             end
         end
     end)
+
+    if not success then
+        Errors.handleError(Errors.Types.COMMAND, "Failed to execute kill command", err)
+    end
 end
 
 return {

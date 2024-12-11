@@ -3,8 +3,6 @@ local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
 local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
 local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
 
--- Rest of forcefield.lua code...
-
 local function toggleForcefield(enable: boolean)
     State.ff.enabled = enable
     if enable then

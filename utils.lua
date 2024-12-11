@@ -1,4 +1,6 @@
-local Services = require("services")
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
 
 local function pcallWithRetry(callback: () -> any, retries: number): (boolean, any)
     local attempts = 0
@@ -8,7 +10,7 @@ local function pcallWithRetry(callback: () -> any, retries: number): (boolean, a
             return true, result
         end
         attempts += 1
-        debugLog("Error", string.format("Attempt %d failed: %s", attempts, tostring(result)))
+        Errors.debugLog("Error", string.format("Attempt %d failed: %s", attempts, tostring(result)))
         task.wait(0.1)
     end
     return false, "Max retries reached"

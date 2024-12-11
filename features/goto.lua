@@ -1,5 +1,6 @@
-local Services = require("services")
-local Errors = require("errors")
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
 
 local function gotoPlayer(target: Player)
     local success, err = pcall(function()
@@ -26,7 +27,6 @@ local function gotoPlayer(target: Player)
             return Errors.handleError(Errors.Types.CHARACTER, "Local HumanoidRootPart not found")
         end
 
-        -- Teleport behind target with slight offset
         localRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
         Errors.notify("Goto", "Teleported to " .. target.Name)
     end)

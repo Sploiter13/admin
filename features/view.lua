@@ -1,6 +1,6 @@
-local Services = require("services")
-local Errors = require("errors")
-local Utils = require("utils")
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
 
 local function setView(targetPlayer: Player?)
     local success, err = pcall(function()
@@ -13,7 +13,6 @@ local function setView(targetPlayer: Player?)
             State.view.target = targetPlayer
             State.view.originalSubject = workspace.CurrentCamera.CameraSubject
             
-            -- Try to set camera subject to humanoid first, fall back to head
             if targetPlayer.Character:FindFirstChild("Humanoid") then
                 workspace.CurrentCamera.CameraSubject = targetPlayer.Character.Humanoid
             elseif targetPlayer.Character:FindFirstChild("Head") then
@@ -30,7 +29,6 @@ local function setView(targetPlayer: Player?)
                     return Errors.handleError(Errors.Types.CHARACTER, "Local character not found")
                 end
 
-                -- Restore original camera subject
                 if localPlayer.Character:FindFirstChild("Humanoid") then
                     workspace.CurrentCamera.CameraSubject = localPlayer.Character.Humanoid
                 elseif localPlayer.Character:FindFirstChild("Head") then

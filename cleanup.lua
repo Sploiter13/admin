@@ -1,6 +1,6 @@
-local Services = require("services")
-local Errors = require("errors")
-local state = require("state")
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
 
 local function destroyPlatform()
     if State.invis.platform then
