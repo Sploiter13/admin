@@ -43,3 +43,7 @@ local function gotoPlayer(target: Player)
         Errors.handleError(Errors.Types.EXCEPTION, err)
     end
 end
+
+return {
+    goto = gotoPlayer
+}
