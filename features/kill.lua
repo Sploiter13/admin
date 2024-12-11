@@ -8,14 +8,10 @@ local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 local function killTargets(targetType: string, loop: boolean)
     local success, err = pcall(function()
         local targets = Utils.getTargets(targetType)
-        if #targets == 0 then
-            return Errors.handleError(Errors.Types.COMMAND, "No valid targets found", targetType)
-        end
+        if #targets == 0 then return Errors.handleError(Errors.Types.COMMAND, "No valid targets found", targetType) end
 
         local meleeEvent = Services.ReplicatedStorage:FindFirstChild("meleeEvent")
-        if not meleeEvent then
-            return Errors.handleError(Errors.Types.EVENT, "MeleeEvent not found")
-        end
+        if not meleeEvent then return Errors.handleError(Errors.Types.EVENT, "MeleeEvent not found") end
 
         State.kill.enabled = loop
         if loop then
@@ -29,49 +25,42 @@ local function killTargets(targetType: string, loop: boolean)
                         if targetRoot and humanoid and humanoid.Health > 0 then
                             local localPlayer = Services.Players.LocalPlayer
                             if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                -- Continuous kill attempts with instant teleports
                                 local startTime = tick()
-                                local attempts = 0
-                                
-                                -- Keep following target until killed or timeout
                                 while humanoid.Health > 0 and (tick() - startTime) < Config.KILL.FF_WAIT do
                                     if not target.Character:FindFirstChildOfClass("ForceField") then
-                                        -- Update position behind target continuously
-                                        localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+                                        -- Predict target movement and teleport
+                                        local targetVelocity = targetRoot.Velocity
+                                        local predictedCFrame = targetRoot.CFrame + targetVelocity * 0.1
+                                        localPlayer.Character.HumanoidRootPart.CFrame = predictedCFrame * CFrame.new(0, 0, 2)
                                         meleeEvent:FireServer(target)
-                                        attempts += 1
-                                        
-                                        if attempts >= Config.KILL.MAX_ATTEMPTS then
-                                            break
-                                        end
                                     end
-                                    task.wait(0.1)
+                                    task.wait(0.03) -- Reduced wait time for faster updates
                                 end
                             end
                         end
                     end
-                    task.wait(Config.KILL.INTERVAL)
+                    task.wait(0.1) -- Reduced interval
                 end
             end)
         else
-            -- Single kill logic with following
+            -- Single kill with aggressive tracking
             for _, target in ipairs(targets) do
-                if target.Character then
-                    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-                    local humanoid = target.Character:FindFirstChild("Humanoid")
-                    
-                    if targetRoot and humanoid and humanoid.Health > 0 then
-                        local localPlayer = Services.Players.LocalPlayer
-                        if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                            local startTime = tick()
-                            
-                            while humanoid.Health > 0 and (tick() - startTime) < Config.KILL.FF_WAIT do
-                                if not target.Character:FindFirstChildOfClass("ForceField") then
-                                    -- Update position continuously
-                                    localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
-                                    meleeEvent:FireServer(target)
-                                end
-                                task.wait()
+                if not target.Character then continue end
+                local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+                local humanoid = target.Character:FindFirstChild("Humanoid")
+                
+                if targetRoot and humanoid and humanoid.Health > 0 then
+                    local localPlayer = Services.Players.LocalPlayer
+                    if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                        local startTime = tick()
+                        -- Rapid kill attempts
+                        while humanoid.Health > 0 and (tick() - startTime) < Config.KILL.FF_WAIT do
+                            if not target.Character:FindFirstChildOfClass("ForceField") then
+                                localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
+                                meleeEvent:FireServer(target)
                             end
+                            task.wait(0.03)
                         end
                     end
                 end
