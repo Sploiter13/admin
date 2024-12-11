@@ -6,26 +6,33 @@ local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 local function gotoPlayer(target: Player)
     local success, err = pcall(function()
         if not target then
-            return Errors.handleError(Errors.Types.CHARACTER, "Target not found")
+            Errors.handleError(Errors.Types.CHARACTER, "Target not found")
+            return
         end
 
-        if not target.Character then
-            return Errors.handleError(Errors.Types.CHARACTER, "Target character not found", target.Name)
+        local targetCharacter = target.Character
+        if not targetCharacter then
+            Errors.handleError(Errors.Types.CHARACTER, "Target character not found", target.Name)
+            return
         end
 
-        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+        local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
         if not targetRoot then
-            return Errors.handleError(Errors.Types.CHARACTER, "Target HumanoidRootPart not found", target.Name)
+            Errors.handleError(Errors.Types.CHARACTER, "Target HumanoidRootPart not found", target.Name)
+            return
         end
 
         local localPlayer = Services.Players.LocalPlayer
-        if not localPlayer.Character then
-            return Errors.handleError(Errors.Types.CHARACTER, "Local character not found")
+        local localCharacter = localPlayer.Character
+        if not localCharacter then
+            Errors.handleError(Errors.Types.CHARACTER, "Local character not found")
+            return
         end
 
-        local localRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local localRoot = localCharacter:FindFirstChild("HumanoidRootPart")
         if not localRoot then
-            return Errors.handleError(Errors.Types.CHARACTER, "Local HumanoidRootPart not found")
+            Errors.handleError(Errors.Types.CHARACTER, "Local HumanoidRootPart not found")
+            return
         end
 
         localRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
@@ -33,10 +40,6 @@ local function gotoPlayer(target: Player)
     end)
 
     if not success then
-        Errors.handleError(Errors.Types.TELEPORT, "Failed to teleport to player", err)
+        Errors.handleError(Errors.Types.EXCEPTION, err)
     end
 end
-
-return {
-    goto = gotoPlayer
-}
