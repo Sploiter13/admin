@@ -19,6 +19,14 @@ local Config = assert(loadModuleSafe("config.lua"), "Failed to load Config")
 local Errors = assert(loadModuleSafe("errors.lua"), "Failed to load Errors")
 local State = loadModuleSafe("state.lua") or {}
 
+-- Debugging Statements
+print("Services loaded:", Services)
+print("Config loaded:", Config)
+print("Errors loaded:", Errors)
+print("State loaded:", State)
+print("Errors.handleError:", Errors.handleError)
+print("Errors.notify:", Errors.notify)
+
 local function toggleInvisibility(enable: boolean)
     if enable and not State.invis.enabled then
         local success, err = pcall(function()
