@@ -70,7 +70,7 @@ local function killTargets(targetType: string, loop: boolean)
                                     localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
                                     meleeEvent:FireServer(target)
                                 end
-                                task.wait(0.1)
+                                task.wait()
                             end
                         end
                     end
