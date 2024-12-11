@@ -13,41 +13,46 @@ local function toggleForcefield(enable: boolean)
                 if localPlayer and localPlayer.Character then
                     local humanoidRootPart = localPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if humanoidRootPart then
-                        -- Track current position
-                        local pos = humanoidRootPart.Position
-                        local ori = humanoidRootPart.CFrame - pos
+                        -- Update last valid position
+                        if tick() - (State.ff.lastUpdate or 0) >= Config.FF.POSITION_UPDATE_INTERVAL then
+                            State.ff.lastPosition = humanoidRootPart.Position
+                            State.ff.lastOrientation = humanoidRootPart.CFrame - State.ff.lastPosition
+                            State.ff.lastUpdate = tick()
+                        end
                         
-                        -- Wait for ForceField
                         local forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
                         if forceField then
                             while forceField and State.ff.enabled do
                                 task.wait(0.1)
                                 forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
-                                pos = humanoidRootPart.Position
-                                ori = humanoidRootPart.CFrame - pos
                             end
                         end
                         
-                        if not State.ff.changingTeam then
+                        if not State.ff.changingTeam and State.ff.lastPosition then
                             State.ff.changingTeam = true
                             
                             local teamEvent = workspace:FindFirstChild("Remote"):FindFirstChild("TeamEvent")
                             if teamEvent then
-                                pos = humanoidRootPart.Position
-                                ori = humanoidRootPart.CFrame - pos
+                                -- Store current position before team change
+                                local savedPos = State.ff.lastPosition
+                                local savedOri = State.ff.lastOrientation
                                 
                                 teamEvent:FireServer(Config.FF.TEAMS.ORANGE)
-                                task.wait(0.3)
+                                task.wait(Config.FF.TEAM_SWITCH_DELAY)
                                 teamEvent:FireServer(Config.FF.TEAMS.BLUE)
-                                task.wait(0.3)
+                                task.wait(Config.FF.TEAM_SWITCH_DELAY)
                                 
-                                -- Restore position
-                                for i = 1, 5 do
+                                -- Restore position with retries
+                                local attempts = 0
+                                while attempts < Config.FF.MAX_ATTEMPTS do
                                     if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                                        localPlayer.Character:MoveTo(pos)
-                                        localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(pos) * ori
-                                        break
+                                        local success = pcall(function()
+                                            localPlayer.Character:MoveTo(savedPos)
+                                            localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(savedPos) * savedOri
+                                        end)
+                                        if success then break end
                                     end
+                                    attempts += 1
                                     task.wait(0.1)
                                 end
                             end
