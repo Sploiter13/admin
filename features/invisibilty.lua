@@ -1,7 +1,22 @@
 local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
-local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
-local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
-local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
+
+-- Load core modules with verification
+local function loadModuleSafe(path)
+    local success, result = pcall(function()
+        return loadstring(game:HttpGet(BASE_URL .. path))()
+    end)
+    if not success then
+        warn("Failed to load: " .. path)
+        return nil
+    end
+    task.wait(0.1)
+    return result
+end
+
+-- Load dependencies
+local Services = assert(loadModuleSafe("services.lua"), "Failed to load Services")
+local Config = assert(loadModuleSafe("config.lua"), "Failed to load Config")
+local Errors = assert(loadModuleSafe("errors.lua"), "Failed to load Errors")
 
 local function toggleInvisibility(enable: boolean)
     if enable and not State.invis.enabled then

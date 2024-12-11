@@ -1,18 +1,33 @@
 local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
-local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
-local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
-local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
-local Utils = loadstring(game:HttpGet(BASE_URL .. "utils.lua"))()
 
--- Feature modules
-local Forcefield = loadstring(game:HttpGet(BASE_URL .. "features/forcefield.lua"))()
-local Kill = loadstring(game:HttpGet(BASE_URL .. "features/kill.lua"))()
-local KillAura = loadstring(game:HttpGet(BASE_URL .. "features/killaura.lua"))()
-local Invisibility = loadstring(game:HttpGet(BASE_URL .. "features/invisibility.lua"))()
-local View = loadstring(game:HttpGet(BASE_URL .. "features/view.lua"))()
-local Goto = loadstring(game:HttpGet(BASE_URL .. "features/goto.lua"))()
+-- Load module with verification
+local function loadModuleSafe(path)
+    local success, result = pcall(function()
+        return loadstring(game:HttpGet(BASE_URL .. path))()
+    end)
+    if not success then
+        warn("Failed to load: " .. path)
+        return nil
+    end
+    task.wait(0.1) -- Add delay between loads
+    return result
+end
 
--- Rest of commands.lua code...
+-- Load core modules
+local Services = assert(loadModuleSafe("services.lua"), "Failed to load Services")
+local Config = assert(loadModuleSafe("config.lua"), "Failed to load Config")
+local Errors = assert(loadModuleSafe("errors.lua"), "Failed to load Errors")
+local Utils = assert(loadModuleSafe("utils.lua"), "Failed to load Utils")
+
+-- Load features with verification
+local Features = {
+    Forcefield = loadModuleSafe("features/forcefield.lua"),
+    Kill = loadModuleSafe("features/kill.lua"),
+    KillAura = loadModuleSafe("features/killaura.lua"),
+    Invisibility = loadModuleSafe("features/invisibility.lua"),
+    View = loadModuleSafe("features/view.lua"),
+    Goto = loadModuleSafe("features/goto.lua")
+}
 
 local function handleCommand(message: string)
     local cmd = message:lower()
@@ -29,43 +44,54 @@ local function handleCommand(message: string)
 
     local success, err = pcall(function()
         if cmd == "/ff" then
-            Forcefield.toggle(true)
-        elseif cmd == "/unff" then
-            Forcefield.toggle(false)
-        elseif cmd:sub(1, 6) == "/kill " then
-            Kill.killTargets(cmd:sub(7), false)
-        elseif cmd:sub(1, 4) == "/lk " then
-            Kill.killTargets(cmd:sub(5), true)
-        elseif cmd == "/unlk" or cmd == "/nolk" then
-            State.kill.enabled = false
-            if State.kill.mainLoop then
-                task.cancel(State.kill.mainLoop)
-                State.kill.mainLoop = nil
+            if Features.Forcefield then
+                Features.Forcefield.toggle(true)
             end
-            Errors.notify("Kill Loop", "Disabled")
+        elseif cmd == "/unff" then
+            if Features.Forcefield then
+                Features.Forcefield.toggle(false)
+            end
+        elseif cmd:sub(1, 6) == "/kill " then
+            if Features.Kill then
+                Features.Kill.killTargets(cmd:sub(7), false)
+            end
         elseif cmd == "/aura" then
-            KillAura.toggle(true)
-        elseif cmd == "/noaura" or cmd == "/unaura" then
-            KillAura.toggle(false)
+            if Features.KillAura then
+                Features.KillAura.toggle(true)
+            end
+        elseif cmd == "/noaura" then
+            if Features.KillAura then
+                Features.KillAura.toggle(false)
+            end
         elseif cmd == "/invis" then
-            Invisibility.toggle(true)
-        elseif cmd == "/visible" or cmd == "/vis" then
-            Invisibility.toggle(false)
+            if Features.Invisibility then
+                Features.Invisibility.toggle(true)
+            end
+        elseif cmd == "/visible" then
+            if Features.Invisibility then
+                Features.Invisibility.toggle(false)
+            end
         elseif cmd:sub(1, 6) == "/view " then
-            local target = Utils.findPlayer(cmd:sub(7))
-            if target then
-                View.set(target)
-            else
-                Errors.notify("Error", "Player not found")
+            if Features.View then
+                local target = Utils.findPlayer(cmd:sub(7))
+                if target then
+                    Features.View.set(target)
+                else
+                    Errors.notify("Error", "Player not found")
+                end
             end
         elseif cmd == "/unview" then
-            View.set(nil)
+            if Features.View then
+                Features.View.set(nil)
+            end
         elseif cmd:sub(1, 6) == "/goto " then
-            local target = Utils.findPlayer(cmd:sub(7))
-            if target then
-                Goto.goto(target)
-            else
-                Errors.notify("Error", "Player not found")
+            if Features.Goto then
+                local target = Utils.findPlayer(cmd:sub(7))
+                if target then
+                    Features.Goto.goto(target)
+                else
+                    Errors.notify("Error", "Player not found")
+                end
             end
         else
             Errors.notify("Error", "Invalid command. Use /cmds for help")
