@@ -5,39 +5,6 @@ local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
 local Utils = loadstring(game:HttpGet(BASE_URL .. "utils.lua"))()
 local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 
-local function getAK47()
-    local success, err = pcall(function()
-        local localPlayer = Services.Players.LocalPlayer
-        if not localPlayer.Character then return end
-
-        local gunGiver = workspace.Prison_ITEMS.giver["AK-47"].ITEMPICKUP
-        if not gunGiver then return end
-
-        local head = localPlayer.Character:FindFirstChild("Head")
-        if not head then return end
-
-        for i = 1,10 do
-            workspace.Remote.ItemHandler:InvokeServer({
-                Position = head.Position,
-                Parent = gunGiver
-            })
-            
-            local ak47 = localPlayer.Backpack:FindFirstChild("AK-47")
-            if ak47 then
-                ak47.Parent = localPlayer.Character
-                return true
-            end
-            
-            task.wait(0.1)
-        end
-    end)
-    
-    if not success then
-        Errors.handleError(Errors.Types.CHARACTER, "Failed to get AK-47", err)
-        return nil
-    end
-end
-
 local function killTargets(targetType: string, loop: boolean)
     local success, err = pcall(function()
         local targets = Utils.getTargets(targetType)
@@ -60,13 +27,26 @@ local function killTargets(targetType: string, loop: boolean)
                         local humanoid = target.Character:FindFirstChild("Humanoid")
                         
                         if targetRoot and humanoid and humanoid.Health > 0 then
-                            local attempts = 0
-                            while humanoid.Health > 0 and attempts < Config.KILL.MAX_ATTEMPTS do
-                                if not target.Character:FindFirstChildOfClass("ForceField") then
-                                    meleeEvent:FireServer(target)
-                                    attempts += 1
+                            -- Teleport behind target
+                            local localPlayer = Services.Players.LocalPlayer
+                            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                local oldPos = localPlayer.Character.HumanoidRootPart.CFrame
+                                localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+                                
+                                -- Kill attempts with retry
+                                local attempts = 0
+                                while humanoid.Health > 0 and attempts < Config.KILL.MAX_ATTEMPTS do
+                                    if not target.Character:FindFirstChildOfClass("ForceField") then
+                                        meleeEvent:FireServer(target)
+                                        attempts += 1
+                                    end
+                                    task.wait(Config.KILL.RETRY_DELAY)
                                 end
-                                task.wait(Config.KILL.RETRY_DELAY)
+                                
+                                -- Return to original position
+                                if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                    localPlayer.Character.HumanoidRootPart.CFrame = oldPos
+                                end
                             end
                         end
                     end
@@ -74,18 +54,32 @@ local function killTargets(targetType: string, loop: boolean)
                 end
             end)
         else
+            -- Single kill logic
             for _, target in ipairs(targets) do
                 if target.Character then
                     local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
                     local humanoid = target.Character:FindFirstChild("Humanoid")
                     
                     if targetRoot and humanoid and humanoid.Health > 0 then
-                        local startTime = tick()
-                        while humanoid.Health > 0 and (tick() - startTime) < 3 do
-                            if not target.Character:FindFirstChildOfClass("ForceField") then
-                                meleeEvent:FireServer(target)
+                        -- Teleport behind target
+                        local localPlayer = Services.Players.LocalPlayer
+                        if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                            local oldPos = localPlayer.Character.HumanoidRootPart.CFrame
+                            localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+                            
+                            -- Kill attempts
+                            local startTime = tick()
+                            while humanoid.Health > 0 and (tick() - startTime) < 3 do
+                                if not target.Character:FindFirstChildOfClass("ForceField") then
+                                    meleeEvent:FireServer(target)
+                                end
+                                task.wait(0.1)
                             end
-                            task.wait(0.1)
+                            
+                            -- Return to original position
+                            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                localPlayer.Character.HumanoidRootPart.CFrame = oldPos
+                            end
                         end
                     end
                 end
@@ -99,6 +93,5 @@ local function killTargets(targetType: string, loop: boolean)
 end
 
 return {
-    killTargets = killTargets,
-    getAK47 = getAK47
+    killTargets = killTargets
 }
