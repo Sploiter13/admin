@@ -1,6 +1,7 @@
 local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
 local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
 local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
+local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 
 -- Rest of errors.lua code...
 

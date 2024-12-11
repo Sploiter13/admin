@@ -3,6 +3,7 @@ local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
 local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
 local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
 local Utils = loadstring(game:HttpGet(BASE_URL .. "utils.lua"))()
+local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 
 local function toggleKillAura(enable: boolean)
     State.aura.enabled = enable

@@ -17,6 +17,7 @@ end
 local Services = assert(loadModuleSafe("services.lua"), "Failed to load Services")
 local Config = assert(loadModuleSafe("config.lua"), "Failed to load Config")
 local Errors = assert(loadModuleSafe("errors.lua"), "Failed to load Errors")
+local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 
 local function toggleInvisibility(enable: boolean)
     if enable and not State.invis.enabled then

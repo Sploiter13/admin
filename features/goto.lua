@@ -1,6 +1,7 @@
 local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
 local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
 local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
+local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 
 local function gotoPlayer(target: Player)
     local success, err = pcall(function()

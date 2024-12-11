@@ -18,6 +18,7 @@ local Services = assert(loadModuleSafe("services.lua"), "Failed to load Services
 local Config = assert(loadModuleSafe("config.lua"), "Failed to load Config")
 local Errors = assert(loadModuleSafe("errors.lua"), "Failed to load Errors")
 local Utils = assert(loadModuleSafe("utils.lua"), "Failed to load Utils")
+local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 
 -- Reference Features from _G (loaded by main script)
 local Features = _G.Features
