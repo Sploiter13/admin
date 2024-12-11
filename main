@@ -1,0 +1,864 @@
+-- Types
+type StateType = {
+    ff: {
+        enabled: boolean,
+        changingTeam: boolean,
+        lastPosition: Vector3?,
+        lastOrientation: CFrame?,
+        lastUpdate: number
+    },
+    kill: {
+        enabled: boolean,
+        mainLoop: thread?
+    },
+    aura: {
+        enabled: boolean,
+        mainLoop: thread?
+    },
+    invis: {
+        enabled: boolean,
+        platform: Part?,
+        savedPosition: Vector3?
+    },
+    view: {
+        enabled: boolean,
+        target: Player?,
+        originalSubject: Instance?
+    }
+}
+
+-- Services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+local UserInputService = game:GetService("UserInputService")
+
+
+-- Configuration
+local CONFIG = table.freeze({
+    FF = {
+        TEAM_SWITCH_DELAY = 0.3,
+        POSITION_UPDATE_INTERVAL = 0.1,
+        MAX_ATTEMPTS = 3,
+        TEAMS = {
+            ORANGE = "Bright orange",
+            BLUE = "Bright blue"
+        }
+    },
+    KILL = {
+        INTERVAL = 0.03,
+        OFFSET = Vector3.new(0, 0, -2),
+        MAX_TARGETS = 10,
+        MAX_ATTEMPTS = 10,  -- Maximum attempts to kill
+        RETRY_DELAY = 0,  -- Delay between retries
+        FF_WAIT = 3       -- How long to wait for forcefield to expire
+    },
+    AURA = {
+        RADIUS = 15,
+        CHECK_INTERVAL = 0.03
+    },
+    INVIS = {
+        PLATFORM_HEIGHT = 10000,
+        TELEPORT_DELAY = 0.25,
+        PLATFORM_SIZE = Vector3.new(10, 1, 10)
+    },
+    DEBUG = true,
+    COMMANDS = {
+        "/cmds - Show all commands",
+        "/ff - Enable forcefield",
+        "/unff - Disable forcefield",
+        "/kill [player/others/team] - Kill specific player, all others, or team",
+        "/aura - Enable kill aura",
+        "/noaura - Disable kill aura",
+        "/invis - Enable invisibility",
+        "/visible - Disable invisibility",
+        "/view [name] - View player",
+        "/unview - Return to own view",
+        "/goto [player] - Teleport to player"
+    }
+})
+
+-- State
+local State: StateType = {
+    ff = {
+        enabled = false,
+        changingTeam = false,
+        lastPosition = nil,
+        lastOrientation = nil,
+        lastUpdate = 0
+    },
+    kill = {
+        enabled = false,
+        mainLoop = nil
+    },
+    aura = {
+        enabled = false,
+        mainLoop = nil
+    },
+    invis = {
+        enabled = false,
+        platform = nil,
+        savedPosition = nil
+    },
+    view = {
+        enabled = false,
+        target = nil,
+        originalSubject = nil
+    }
+}
+
+
+-- Error Types and Handling
+local ErrorTypes = {
+    TEAM_CHANGE = "TeamChangeError",
+    POSITION = "PositionError",
+    CHARACTER = "CharacterError",
+    EVENT = "EventError",
+    TELEPORT = "TeleportError",
+    PLATFORM = "PlatformError",
+    VIEW = "ViewError",
+    COMMAND = "CommandError"
+}
+
+local function debugLog(feature: string, message: string)
+    if CONFIG.DEBUG then
+        warn(string.format("[%s] %s", feature, message))
+    end
+end
+
+local function notify(title: string, message: string)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = title,
+            Text = message,
+            Duration = 3
+        })
+    end)
+end
+
+local function handleError(errorType: string, message: string, context: any?)
+    -- Add error logging to a file or remote service
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local errorData = {
+        timestamp = timestamp,
+        type = errorType,
+        message = message,
+        context = context
+    }
+    -- Could add pcall around notification to prevent cascading errors
+    pcall(function()
+        notify("Error", message)
+    end)
+    return false, errorData
+end
+
+local function pcallWithRetry(callback: () -> any, retries: number): (boolean, any)
+    local attempts = 0
+    while attempts < retries do
+        local success, result = pcall(callback)
+        if success then
+            return true, result
+        end
+        attempts += 1
+        debugLog("Error", string.format("Attempt %d failed: %s", attempts, tostring(result)))
+        task.wait(0.1)
+    end
+    return false, "Max retries reached"
+end
+
+local function findPlayer(name: string): Player?
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Name:lower():find(name:lower(), 1, true) then
+            return player
+        end
+    end
+    return nil
+end
+
+local function getTargets(targetType: string): {Player}
+    local targets = {}
+    local localPlayer = Players.LocalPlayer
+
+    if targetType:lower() == "others" then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer then
+                table.insert(targets, player)
+            end
+        end
+        return targets
+    end
+
+    if targetType:sub(1, 5):lower() == "team " then
+        local teamName = targetType:sub(6)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer and player.Team and 
+               player.Team.Name:lower():find(teamName:lower(), 1, true) then
+                table.insert(targets, player)
+            end
+        end
+        if #targets > 0 then
+            return targets
+        end
+    end
+
+    local target = findPlayer(targetType)
+    if target then
+        table.insert(targets, target)
+    end
+
+    return targets
+end
+
+-- Forcefield Function
+local function toggleForcefield(enable: boolean)
+    State.ff.enabled = enable
+    if enable then
+        task.spawn(function()
+            while State.ff.enabled do
+                local localPlayer = Players.LocalPlayer
+                if localPlayer and localPlayer.Character then
+                    local humanoidRootPart = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if humanoidRootPart then
+                        -- Track current position
+                        local pos = humanoidRootPart.Position
+                        local ori = humanoidRootPart.CFrame - pos
+                        
+                        -- Wait for ForceField
+                        local forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
+                        if forceField then
+                            while forceField and State.ff.enabled do
+                                task.wait(0.1)
+                                forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
+                                pos = humanoidRootPart.Position
+                                ori = humanoidRootPart.CFrame - pos
+                            end
+                        end
+                        
+                        if not State.ff.changingTeam then
+                            State.ff.changingTeam = true
+                            
+                            local teamEvent = workspace:FindFirstChild("Remote"):FindFirstChild("TeamEvent")
+                            if teamEvent then
+                                pos = humanoidRootPart.Position
+                                ori = humanoidRootPart.CFrame - pos
+                                
+                                teamEvent:FireServer(CONFIG.FF.TEAMS.ORANGE)
+                                task.wait(0.3)
+                                teamEvent:FireServer(CONFIG.FF.TEAMS.BLUE)
+                                task.wait(0.3)
+                                
+                                -- Restore position
+                                for i = 1, 5 do
+                                    if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                        localPlayer.Character:MoveTo(pos)
+                                        localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(pos) * ori
+                                        break
+                                    end
+                                    task.wait(0.1)
+                                end
+                            end
+                            State.ff.changingTeam = false
+                        end
+                    end
+                end
+                task.wait(0.5)
+            end
+        end)
+        notify("Forcefield", "Enabled")
+    else
+        notify("Forcefield", "Disabled")
+    end
+end
+
+-- Kill Functions
+local function killTargets(targetType: string, loop: boolean)
+    local success, err = pcall(function()
+        local targets = getTargets(targetType)
+        if #targets == 0 then
+            return handleError(ErrorTypes.COMMAND, "No valid targets found", targetType)
+        end
+
+        local meleeEvent = ReplicatedStorage:FindFirstChild("meleeEvent")
+        if not meleeEvent then
+            return handleError(ErrorTypes.EVENT, "MeleeEvent not found")
+        end
+
+        local localPlayer = Players.LocalPlayer
+        if not localPlayer or not localPlayer.Character then
+            return handleError(ErrorTypes.CHARACTER, "Local character not found")
+        end
+
+        local localRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not localRoot then
+            return handleError(ErrorTypes.CHARACTER, "Local HumanoidRootPart not found")
+        end
+
+        -- Store original position
+        local originalCFrame = localRoot.CFrame
+
+        if loop then
+            -- Loop kill logic remains the same
+            State.kill.enabled = true
+            State.kill.mainLoop = task.spawn(function()
+                while State.kill.enabled do
+                    for _, target in ipairs(targets) do
+                        if not target.Character then continue end
+
+                        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+                        local humanoid = target.Character:FindFirstChild("Humanoid")
+                        
+                        if targetRoot and humanoid and humanoid.Health > 0 then
+                            -- Track attempts for this target
+                            local attempts = 0
+                            local startTime = tick()
+                            
+                            -- Keep trying until target dies or max attempts reached
+                            while humanoid.Health > 0 and attempts < CONFIG.KILL.MAX_ATTEMPTS do
+                                -- Check for forcefield
+                                if target.Character:FindFirstChildOfClass("ForceField") then
+                                    -- Wait for forcefield to expire
+                                    local ffWaitStart = tick()
+                                    while target.Character:FindFirstChildOfClass("ForceField") and 
+                                          (tick() - ffWaitStart) < CONFIG.KILL.FF_WAIT do
+                                        task.wait(0.1)
+                                    end
+                                end
+                                
+                                -- Attack if no forcefield
+                                if not target.Character:FindFirstChildOfClass("ForceField") then
+                                    localRoot.CFrame = targetRoot.CFrame * CFrame.new(CONFIG.KILL.OFFSET)
+                                    meleeEvent:FireServer(target)
+                                    attempts += 1
+                                end
+                                
+                                task.wait(CONFIG.KILL.RETRY_DELAY)
+                            end
+                            
+                            -- Log result
+                            if humanoid.Health <= 0 then
+                                notify("Kill", "Successfully killed " .. target.Name)
+                            end
+                        end
+                    end
+                    task.wait(CONFIG.KILL.INTERVAL)
+                end
+            end)
+            notify("Kill", "Started loop targeting " .. targetType)
+        else
+            -- Single kill logic with persistence
+            for _, target in ipairs(targets) do
+                if target.Character then
+                    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+                    local humanoid = target.Character:FindFirstChild("Humanoid")
+                    
+                    if targetRoot and humanoid and humanoid.Health > 0 then
+                        -- Keep attacking until target dies or timeout
+                        local startTime = tick()
+                        local killed = false
+                        
+                        while humanoid.Health > 0 and (tick() - startTime) < 3 do
+                            if not target.Character:FindFirstChildOfClass("ForceField") then
+                                localRoot.CFrame = targetRoot.CFrame * CFrame.new(CONFIG.KILL.OFFSET)
+                                meleeEvent:FireServer(target)
+                            end
+                            task.wait(0.1)
+                        end
+                        
+                        -- Return to original position
+                        localRoot.CFrame = originalCFrame
+                        
+                        if humanoid.Health <= 0 then
+                            notify("Kill", "Successfully killed " .. target.Name)
+                        else
+                            notify("Kill", "Failed to kill " .. target.Name)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    if not success then
+        handleError(ErrorTypes.COMMAND, "Failed to execute kill command", err)
+    end
+end
+
+-- Add gun acquisition functions
+-- Modified gun acquisition function
+-- Modified gun acquisition function with repeated remote invocation
+local function getAK47()
+    local success, err = pcall(function()
+        local localPlayer = Players.LocalPlayer
+        if not localPlayer.Character then return end
+
+        -- Get gun giver
+        local gunGiver = workspace.Prison_ITEMS.giver["AK-47"].ITEMPICKUP
+        if not gunGiver then return end
+
+        -- Store original position if needed
+        local character = localPlayer.Character
+        local head = character:FindFirstChild("Head")
+        if not head then return end
+
+        -- Try multiple times to get the gun
+        for i = 1,10 do
+            workspace.Remote.ItemHandler:InvokeServer({
+                Position = head.Position,
+                Parent = gunGiver
+            })
+            
+            -- Check if gun was received
+            local ak47 = localPlayer.Backpack:FindFirstChild("AK-47")
+            if ak47 then
+                ak47.Parent = character
+                return true
+            end
+            
+            task.wait(0.1) -- Small delay between attempts
+        end
+    end)
+    
+    if not success then
+        handleError(ErrorTypes.CHARACTER, "Failed to get AK-47", err)
+        return nil
+    end
+    
+    return Players.LocalPlayer.Character:FindFirstChild("AK-47")
+end
+
+-- Modify gunKill function
+local function gunKill(target: Player, loop: boolean)
+    local success, err = pcall(function()
+        if not target then
+            return handleError(ErrorTypes.CHARACTER, "Target not found")
+        end
+
+        if not target.Character then
+            return handleError(ErrorTypes.CHARACTER, "Target character not found", target.Name)
+        end
+
+        local localPlayer = Players.LocalPlayer
+        if not localPlayer.Character then
+            return handleError(ErrorTypes.CHARACTER, "Local character not found")
+        end
+
+        -- Get/equip weapon
+        local weapon = localPlayer.Character:FindFirstChild("AK-47") or getAK47()
+        if not weapon then
+            return handleError(ErrorTypes.CHARACTER, "Failed to get AK-47")
+        end
+
+        local shootEvent = ReplicatedStorage:WaitForChild("ShootEvent")
+        
+        if loop then
+            State.kill.enabled = true
+            State.kill.mainLoop = task.spawn(function()
+                while State.kill.enabled do
+                    local humanoid = target.Character:FindFirstChild("Humanoid")
+                    if not humanoid or humanoid.Health <= 0 then
+                        State.kill.enabled = false
+                        notify("Kill", "Successfully killed " .. target.Name)
+                        break
+                    end
+
+                    -- Get target parts
+                    local parts = {"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
+                    
+                    for _, partName in ipairs(parts) do
+                        local targetPart = target.Character:FindFirstChild(partName)
+                        if targetPart then
+                            -- Create shot data
+                            local rayOrigin = localPlayer.Character.HumanoidRootPart.Position
+                            local rayDirection = (targetPart.Position - rayOrigin).Unit * 20
+                            
+                            local rayData = {
+                                [1] = {
+                                    ["RayObject"] = Ray.new(rayOrigin, rayDirection),
+                                    ["Distance"] = (targetPart.Position - rayOrigin).Magnitude,
+                                    ["Cframe"] = targetPart.CFrame,
+                                    ["Hit"] = targetPart
+                                }
+                            }
+                            
+                            -- Fire event
+                            shootEvent:FireServer(rayData, weapon)
+                            task.wait(0.1)
+                        end
+                    end
+                    task.wait(0.2)
+                end
+            end)
+        else
+            -- Single shot logic until target dies
+            local humanoid = target.Character:FindFirstChild("Humanoid")
+            while humanoid and humanoid.Health > 0 do
+                local targetPart = target.Character:FindFirstChild("Head") or target.Character:FindFirstChild("Torso")
+                if targetPart then
+                    local rayOrigin = localPlayer.Character.HumanoidRootPart.Position
+                    local rayDirection = (targetPart.Position - rayOrigin).Unit * 20
+                    
+                    local rayData = {
+                        [1] = {
+                            ["RayObject"] = Ray.new(rayOrigin, rayDirection),
+                            ["Distance"] = (targetPart.Position - rayOrigin).Magnitude,
+                            ["Cframe"] = targetPart.CFrame,
+                            ["Hit"] = targetPart
+                        }
+                    }
+                    
+                    shootEvent:FireServer(rayData, weapon)
+                    task.wait(0.1)
+                end
+            end
+            
+            notify("Kill", "Successfully killed " .. target.Name)
+        end
+    end)
+
+    if not success then
+        handleError(ErrorTypes.COMMAND, "Failed to execute gun kill", err)
+    end
+end
+
+-- Kill Aura Function
+local function toggleKillAura(enable: boolean)
+    State.aura.enabled = enable
+    if enable then
+        State.aura.mainLoop = task.spawn(function()
+            while State.aura.enabled do
+                local success, err = pcallWithRetry(function()
+                    local localPlayer = Players.LocalPlayer
+                    if localPlayer and localPlayer.Character then
+                        local root = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if root then
+                            local meleeEvent = ReplicatedStorage:FindFirstChild("meleeEvent")
+                            if meleeEvent then
+                                for _, player in ipairs(Players:GetPlayers()) do
+                                    if player ~= localPlayer and player.Character then
+                                        local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                                        if targetRoot 
+                                        and player.Character:FindFirstChild("Humanoid") 
+                                        and player.Character.Humanoid.Health > 0 
+                                        and not player.Character:FindFirstChildOfClass("ForceField") then
+                                            local distance = (targetRoot.Position - root.Position).Magnitude
+                                            if distance <= CONFIG.AURA.RADIUS then
+                                                meleeEvent:FireServer(player)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end, 3)
+                
+                if not success then
+                    debugLog("Kill Aura", "Error: " .. tostring(err))
+                end
+                
+                task.wait(CONFIG.AURA.CHECK_INTERVAL)
+            end
+        end)
+        notify("Kill Aura", "Enabled")
+    else
+        if State.aura.mainLoop then
+            task.cancel(State.aura.mainLoop)
+            State.aura.mainLoop = nil
+        end
+        notify("Kill Aura", "Disabled")
+    end
+end
+
+-- Invisibility Functions
+local function toggleInvisibility(enable: boolean)
+    if enable and not State.invis.enabled then
+        local success, err = pcall(function()
+            local character = Players.LocalPlayer.Character
+            if not character then
+                return handleError(ErrorTypes.CHARACTER, "Character not found")
+            end
+
+            local hrp = character:WaitForChild("HumanoidRootPart")
+            State.invis.savedPosition = hrp.Position
+            
+            State.invis.platform = Instance.new("Part")
+            State.invis.platform.Size = CONFIG.INVIS.PLATFORM_SIZE
+            State.invis.platform.Position = Vector3.new(0, CONFIG.INVIS.PLATFORM_HEIGHT, 0)
+            State.invis.platform.Anchored = true
+            State.invis.platform.CanCollide = true
+            State.invis.platform.Transparency = 1
+            State.invis.platform.Parent = workspace
+            
+            local touched = false
+            State.invis.platform.Touched:Connect(function(hit)
+                if not touched and hit.Parent == character then
+                    touched = true
+                    
+                    task.spawn(function()
+                        local clone = hrp:Clone()
+                        task.wait(CONFIG.INVIS.TELEPORT_DELAY)
+                        hrp:Destroy()
+                        clone.Parent = character
+                        character:MoveTo(State.invis.savedPosition)
+                        
+                        State.invis.enabled = true
+                        if State.invis.platform then
+                            State.invis.platform:Destroy()
+                            State.invis.platform = nil
+                        end
+                        
+                        notify("Invisibility", "Enabled")
+                    end)
+                end
+            end)
+            
+            character:MoveTo(State.invis.platform.Position + Vector3.new(0, 3, 0))
+        end)
+        
+        if not success then
+            handleError(ErrorTypes.CHARACTER, "Failed to enable invisibility", err)
+        end
+    elseif not enable and State.invis.enabled then
+        local success, err = pcall(function()
+            local player = Players.LocalPlayer
+            local position = State.invis.savedPosition
+            
+            if position then
+                if player.Character then
+                    player.Character.Humanoid.Health = 0
+                end
+                
+                local connection
+                connection = player.CharacterAdded:Connect(function(newCharacter)
+                    connection:Disconnect()
+                    task.wait(0.1)
+                    
+                    newCharacter:WaitForChild("HumanoidRootPart")
+                    newCharacter:MoveTo(position)
+                    
+                    State.invis.enabled = false
+                    State.invis.savedPosition = nil
+                    
+                    notify("Invisibility", "Disabled")
+                end)
+            end
+        end)
+        
+        if not success then
+            handleError(ErrorTypes.CHARACTER, "Failed to disable invisibility", err)
+        end
+    end
+end
+
+-- View Functions
+local function setView(targetPlayer: Player?)
+    local success, err = pcall(function()
+        if targetPlayer then
+            if not targetPlayer.Character then
+                return handleError(ErrorTypes.CHARACTER, "Target character not found", targetPlayer.Name)
+            end
+
+            State.view.enabled = true
+            State.view.target = targetPlayer
+            State.view.originalSubject = workspace.CurrentCamera.CameraSubject
+            
+            if targetPlayer.Character:FindFirstChild("Humanoid") then
+                workspace.CurrentCamera.CameraSubject = targetPlayer.Character.Humanoid
+            elseif targetPlayer.Character:FindFirstChild("Head") then
+                workspace.CurrentCamera.CameraSubject = targetPlayer.Character.Head
+            else
+                return handleError(ErrorTypes.VIEW, "No valid camera subject found", targetPlayer.Name)
+            end
+            
+            notify("View", "Now viewing: " .. targetPlayer.Name)
+        else
+            if State.view.enabled then
+                local localPlayer = Players.LocalPlayer
+                if not localPlayer.Character then
+                    return handleError(ErrorTypes.CHARACTER, "Local character not found")
+                end
+
+                if localPlayer.Character:FindFirstChild("Humanoid") then
+                    workspace.CurrentCamera.CameraSubject = localPlayer.Character.Humanoid
+                elseif localPlayer.Character:FindFirstChild("Head") then
+                    workspace.CurrentCamera.CameraSubject = localPlayer.Character.Head
+                else
+                    return handleError(ErrorTypes.VIEW, "No valid camera subject found for local player")
+                end
+
+                State.view.enabled = false
+                State.view.target = nil
+                notify("View", "Returned to own view")
+            end
+        end
+    end)
+    
+    if not success then
+        handleError(ErrorTypes.VIEW, "Failed to set view", err)
+    end
+end
+
+-- Goto Player Function
+local function gotoPlayer(target: Player)
+    local success, err = pcall(function()
+        if not target then
+            return handleError(ErrorTypes.CHARACTER, "Target not found")
+        end
+
+        if not target.Character then
+            return handleError(ErrorTypes.CHARACTER, "Target character not found", target.Name)
+        end
+
+        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+        if not targetRoot then
+            return handleError(ErrorTypes.CHARACTER, "Target HumanoidRootPart not found", target.Name)
+        end
+
+        local localPlayer = Players.LocalPlayer
+        if not localPlayer.Character then
+            return handleError(ErrorTypes.CHARACTER, "Local character not found")
+        end
+
+        local localRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not localRoot then
+            return handleError(ErrorTypes.CHARACTER, "Local HumanoidRootPart not found")
+        end
+
+        -- Teleport behind target
+        localRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+        notify("Goto", "Teleported to " .. target.Name)
+    end)
+
+    if not success then
+        handleError(ErrorTypes.TELEPORT, "Failed to teleport to player", err)
+    end
+end
+
+-- Command Handler
+Players.LocalPlayer.Chatted:Connect(function(message: string)
+    local cmd = message:lower()
+    
+    if cmd == "/cmds" then
+        task.spawn(function()
+            for _, command in ipairs(CONFIG.COMMANDS) do
+                notify("Commands", command)
+                task.wait(0.6)
+            end
+        end)
+        return
+    end
+    
+    local success, err = pcall(function()
+        if cmd == "/ff" then
+            toggleForcefield(true)
+        elseif cmd == "/unff" then
+            toggleForcefield(false)
+        elseif cmd:sub(1, 6) == "/kill " then
+            local targetType = cmd:sub(7)
+            killTargets(targetType, false)
+        elseif cmd == "/aura" then
+            toggleKillAura(true)
+        elseif cmd == "/noaura" or cmd == "/unaura" then
+            toggleKillAura(false)
+        elseif cmd == "/invis" then
+            toggleInvisibility(true)
+        elseif cmd == "/visible" or cmd == "/vis"then
+            toggleInvisibility(false)
+        elseif cmd:sub(1, 6) == "/view " then
+            local target = findPlayer(cmd:sub(7))
+            if target then
+                setView(target)
+            else
+                notify("Error", "Player not found")
+            end
+        elseif cmd == "/unview" then
+            setView(nil)
+        elseif cmd:sub(1, 6) == "/goto " then
+            local target = findPlayer(cmd:sub(7))
+            if target then
+                gotoPlayer(target)
+            else
+                notify("Error", "Player not found")
+            end
+        elseif cmd:sub(1, 4) == "/lk " then
+            local targetType = cmd:sub(5)
+            killTargets(targetType, true)
+        elseif cmd == "/unlk" or cmd == "/nolk" then
+            State.kill.enabled = false
+            if State.kill.mainLoop then
+                task.cancel(State.kill.mainLoop)
+                State.kill.mainLoop = nil
+            end
+            notify("Kill Loop", "Disabled")        
+        elseif cmd:sub(1, 5) == "/gk " then
+                local targetName = cmd:sub(6)
+                local target = findPlayer(targetName)
+                if target then
+                    gunKill(target, false)
+                else
+                    notify("Error", "Player not found")
+                end
+        elseif cmd:sub(1, 6) == "/lgk " then
+                local targetName = cmd:sub(7) 
+                local target = findPlayer(targetName)
+                if target then
+                    gunKill(target, true)
+                else
+                    notify("Error", "Player not found")
+                end
+        else
+            notify("Error", "Invalid command. Use /cmds for help")
+        end
+    end)
+    
+    if not success then
+        handleError(ErrorTypes.COMMAND, "Command execution failed", err)
+    end
+end)
+
+
+-- Cleanup Function
+
+local function destroyPlatform()
+    if State.invis.platform then
+        State.invis.platform:Destroy()
+        State.invis.platform = nil
+    end
+end
+
+local function cleanup()
+    -- Disable all features
+    State.ff.enabled = false
+    State.kill.enabled = false
+    State.aura.enabled = false
+    
+    -- Cancel all loops
+    if State.kill.mainLoop then
+        task.cancel(State.kill.mainLoop)
+        State.kill.mainLoop = nil
+    end
+    if State.aura.mainLoop then
+        task.cancel(State.aura.mainLoop)
+        State.aura.mainLoop = nil
+    end
+    
+    -- Cleanup instances
+    if State.invis then
+        destroyPlatform()
+    end
+    
+    -- Reset view
+    if State.view.enabled then
+        setView(nil)
+    end
+    
+    debugLog("Cleanup", "Script shutdown complete")
+end
+
+-- Connect cleanup to character respawn
+Players.LocalPlayer.CharacterAdded:Connect(function()
+    if State.invis and not State.invis.enabled then
+        destroyPlatform()
+        State.invis.savedPosition = nil
+    end
+end)
