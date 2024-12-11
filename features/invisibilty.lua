@@ -96,5 +96,5 @@ local function toggleInvisibility(enable: boolean)
 end
 
 return {
-    toggle = toggleInvisibility
+    toggleInvisibility = toggleInvisibility
 }
