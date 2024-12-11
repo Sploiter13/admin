@@ -7,7 +7,7 @@ local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 local function toggleForcefield(enable: boolean)
     State.ff.enabled = enable
     if enable then
-        -- Start position tracking in separate loop
+        -- Position tracking loop
         task.spawn(function()
             while State.ff.enabled do
                 local localPlayer = Services.Players.LocalPlayer
@@ -15,7 +15,7 @@ local function toggleForcefield(enable: boolean)
                     State.ff.lastPosition = localPlayer.Character.HumanoidRootPart.Position
                     State.ff.lastOrientation = localPlayer.Character.HumanoidRootPart.CFrame - State.ff.lastPosition
                 end
-                task.wait(0.01) -- Very frequent position updates
+                task.wait(0.01)
             end
         end)
 
@@ -28,7 +28,33 @@ local function toggleForcefield(enable: boolean)
                     if humanoidRootPart then
                         local forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
                         if forceField then
+                            -- Track FF duration
+                            local ffStartTime = tick()
                             while forceField and State.ff.enabled do
+                                -- Pre-emptively restore position if FF is about to expire
+                                if (tick() - ffStartTime) > 2.8 then  -- FF usually lasts 3 seconds
+                                    if not State.ff.changingTeam and State.ff.lastPosition then
+                                        State.ff.changingTeam = true
+                                        
+                                        local teamEvent = workspace:FindFirstChild("Remote"):FindFirstChild("TeamEvent")
+                                        if teamEvent then
+                                            local savedPos = State.ff.lastPosition
+                                            local savedOri = State.ff.lastOrientation
+                                            
+                                            teamEvent:FireServer(Config.FF.TEAMS.ORANGE)
+                                            task.wait(0.3) -- Increased delay
+                                            teamEvent:FireServer(Config.FF.TEAMS.BLUE)
+                                            task.wait(0.3) -- Increased delay
+                                            
+                                            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                                localPlayer.Character:MoveTo(savedPos)
+                                                localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(savedPos) * savedOri
+                                            end
+                                        end
+                                        State.ff.changingTeam = false
+                                        break
+                                    end
+                                end
                                 task.wait(0.03)
                                 forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
                             end
@@ -39,17 +65,14 @@ local function toggleForcefield(enable: boolean)
                             
                             local teamEvent = workspace:FindFirstChild("Remote"):FindFirstChild("TeamEvent")
                             if teamEvent then
-                                -- Get latest position right before team switch
                                 local savedPos = State.ff.lastPosition
                                 local savedOri = State.ff.lastOrientation
                                 
-                                -- Rapid team switching
                                 teamEvent:FireServer(Config.FF.TEAMS.ORANGE)
-                                task.wait(0.1)
+                                task.wait(0.3)
                                 teamEvent:FireServer(Config.FF.TEAMS.BLUE)
-                                task.wait(0.1)
+                                task.wait(0.3)
                                 
-                                -- Instant position restoration using latest position
                                 if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
                                     localPlayer.Character:MoveTo(savedPos)
                                     localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(savedPos) * savedOri
