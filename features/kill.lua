@@ -27,25 +27,24 @@ local function killTargets(targetType: string, loop: boolean)
                         local humanoid = target.Character:FindFirstChild("Humanoid")
                         
                         if targetRoot and humanoid and humanoid.Health > 0 then
-                            -- Teleport behind target
                             local localPlayer = Services.Players.LocalPlayer
                             if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                                local oldPos = localPlayer.Character.HumanoidRootPart.CFrame
-                                localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
-                                
-                                -- Kill attempts with retry
+                                local startTime = tick()
                                 local attempts = 0
-                                while humanoid.Health > 0 and attempts < Config.KILL.MAX_ATTEMPTS do
+                                
+                                -- Keep following target until killed or timeout
+                                while humanoid.Health > 0 and (tick() - startTime) < Config.KILL.FF_WAIT do
                                     if not target.Character:FindFirstChildOfClass("ForceField") then
+                                        -- Update position behind target continuously
+                                        localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
                                         meleeEvent:FireServer(target)
                                         attempts += 1
+                                        
+                                        if attempts >= Config.KILL.MAX_ATTEMPTS then
+                                            break
+                                        end
                                     end
-                                    task.wait(Config.KILL.RETRY_DELAY)
-                                end
-                                
-                                -- Return to original position
-                                if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                                    localPlayer.Character.HumanoidRootPart.CFrame = oldPos
+                                    task.wait(0.1)
                                 end
                             end
                         end
@@ -54,31 +53,24 @@ local function killTargets(targetType: string, loop: boolean)
                 end
             end)
         else
-            -- Single kill logic
+            -- Single kill logic with following
             for _, target in ipairs(targets) do
                 if target.Character then
                     local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
                     local humanoid = target.Character:FindFirstChild("Humanoid")
                     
                     if targetRoot and humanoid and humanoid.Health > 0 then
-                        -- Teleport behind target
                         local localPlayer = Services.Players.LocalPlayer
                         if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                            local oldPos = localPlayer.Character.HumanoidRootPart.CFrame
-                            localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
-                            
-                            -- Kill attempts
                             local startTime = tick()
-                            while humanoid.Health > 0 and (tick() - startTime) < 3 do
+                            
+                            while humanoid.Health > 0 and (tick() - startTime) < Config.KILL.FF_WAIT do
                                 if not target.Character:FindFirstChildOfClass("ForceField") then
+                                    -- Update position continuously
+                                    localPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
                                     meleeEvent:FireServer(target)
                                 end
                                 task.wait(0.1)
-                            end
-                            
-                            -- Return to original position
-                            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                                localPlayer.Character.HumanoidRootPart.CFrame = oldPos
                             end
                         end
                     end
