@@ -7,10 +7,18 @@ local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 local function toggleForcefield(enable: boolean)
     State.ff.enabled = enable
     if enable then
+        -- Initial team switch to get FF
+        local localPlayer = Services.Players.LocalPlayer
+        local teamEvent = workspace:FindFirstChild("Remote"):FindFirstChild("TeamEvent")
+        if teamEvent then
+            teamEvent:FireServer(Config.FF.TEAMS.ORANGE)
+            task.wait(0.3)
+            teamEvent:FireServer(Config.FF.TEAMS.BLUE)
+        end
+
         -- Position tracking loop
         task.spawn(function()
             while State.ff.enabled do
-                local localPlayer = Services.Players.LocalPlayer
                 if localPlayer and localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
                     State.ff.lastPosition = localPlayer.Character.HumanoidRootPart.Position
                     State.ff.lastOrientation = localPlayer.Character.HumanoidRootPart.CFrame - State.ff.lastPosition
@@ -22,7 +30,6 @@ local function toggleForcefield(enable: boolean)
         -- Main FF loop
         task.spawn(function()
             while State.ff.enabled do
-                local localPlayer = Services.Players.LocalPlayer
                 if localPlayer and localPlayer.Character then
                     local humanoidRootPart = localPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if humanoidRootPart then
@@ -32,9 +39,8 @@ local function toggleForcefield(enable: boolean)
 
                         if forceField then
                             hasFF = true
-                            -- Wait for FF to almost expire
                             while forceField and State.ff.enabled do
-                                if (tick() - ffStartTime) > 2.8 then -- FF about to expire
+                                if (tick() - ffStartTime) > 2.8 then
                                     break
                                 end
                                 task.wait(0.03)
@@ -42,11 +48,9 @@ local function toggleForcefield(enable: boolean)
                             end
                         end
 
-                        -- Only switch teams if FF was active and is about to expire
                         if hasFF and not State.ff.changingTeam and State.ff.lastPosition then
                             State.ff.changingTeam = true
                             
-                            local teamEvent = workspace:FindFirstChild("Remote"):FindFirstChild("TeamEvent")
                             if teamEvent then
                                 local savedPos = State.ff.lastPosition
                                 local savedOri = State.ff.lastOrientation
