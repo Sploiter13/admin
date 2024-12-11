@@ -17,87 +17,63 @@ end
 local Services = assert(loadModuleSafe("services.lua"), "Failed to load Services")
 local Config = assert(loadModuleSafe("config.lua"), "Failed to load Config")
 local Errors = assert(loadModuleSafe("errors.lua"), "Failed to load Errors")
-local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
+local State = loadModuleSafe("state.lua") or {}
 
 local function toggleInvisibility(enable: boolean)
     if enable and not State.invis.enabled then
         local success, err = pcall(function()
             local character = Services.Players.LocalPlayer.Character
             if not character then
-                return Errors.handleError(Errors.Types.CHARACTER, "Character not found")
+                Errors.handleError(Errors.Types.CHARACTER, "Character not found")
+                return
             end
 
             local hrp = character:WaitForChild("HumanoidRootPart")
             State.invis.savedPosition = hrp.Position
-            
+
             State.invis.platform = Instance.new("Part")
-            State.invis.platform.Size = Config.INVIS.PLATFORM_SIZE
-            State.invis.platform.Position = Vector3.new(0, Config.INVIS.PLATFORM_HEIGHT, 0)
-            State.invis.platform.Anchored = true
-            State.invis.platform.CanCollide = true
+            State.invis.platform.Size = Vector3.new(1, 1, 1)
             State.invis.platform.Transparency = 1
+            State.invis.platform.CanCollide = false
+            State.invis.platform.Anchored = true
             State.invis.platform.Parent = workspace
-            
-            local touched = false
-            State.invis.platform.Touched:Connect(function(hit)
-                if not touched and hit.Parent == character then
-                    touched = true
-                    task.spawn(function()
-                        local clone = hrp:Clone()
-                        task.wait(Config.INVIS.TELEPORT_DELAY)
-                        hrp:Destroy()
-                        clone.Parent = character
-                        character:MoveTo(State.invis.savedPosition)
-                        
-                        State.invis.enabled = true
-                        if State.invis.platform then
-                            State.invis.platform:Destroy()
-                            State.invis.platform = nil
-                        end
-                        
-                        Errors.notify("Invisibility", "Enabled")
-                    end)
-                end
-            end)
-            
-            character:MoveTo(State.invis.platform.Position + Vector3.new(0, 3, 0))
+            hrp.CFrame = State.invis.platform.CFrame
+
+            State.invis.enabled = true
+            Errors.notify("Invisibility", "Invisibility enabled.")
         end)
-        
+
         if not success then
-            Errors.handleError(Errors.Types.CHARACTER, "Failed to enable invisibility", err)
+            Errors.handleError(Errors.Types.EXCEPTION, err)
         end
     elseif not enable and State.invis.enabled then
         local success, err = pcall(function()
-            local player = Services.Players.LocalPlayer
-            local position = State.invis.savedPosition
-            
-            if position then
-                if player.Character then
-                    player.Character.Humanoid.Health = 0
-                end
-                
-                local connection
-                connection = player.CharacterAdded:Connect(function(newCharacter)
-                    connection:Disconnect()
-                    task.wait(0.1)
-                    
-                    newCharacter:WaitForChild("HumanoidRootPart")
-                    newCharacter:MoveTo(position)
-                    
-                    State.invis.enabled = false
-                    State.invis.savedPosition = nil
-                    
-                    Errors.notify("Invisibility", "Disabled")
-                end)
+            local character = Services.Players.LocalPlayer.Character
+            if not character then
+                Errors.handleError(Errors.Types.CHARACTER, "Character not found")
+                return
             end
+
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            if hrp and State.invis.savedPosition then
+                hrp.Position = State.invis.savedPosition
+            end
+
+            if State.invis.platform then
+                State.invis.platform:Destroy()
+                State.invis.platform = nil
+            end
+
+            State.invis.enabled = false
+            Errors.notify("Invisibility", "Invisibility disabled.")
         end)
-        
+
         if not success then
-            Errors.handleError(Errors.Types.CHARACTER, "Failed to disable invisibility", err)
+            Errors.handleError(Errors.Types.EXCEPTION, err)
         end
     end
 end
 
 return {
-    toggle = toggleInvisibility
+    toggleInvisibility = toggleInvisibility
 }
