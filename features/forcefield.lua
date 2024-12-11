@@ -27,40 +27,23 @@ local function toggleForcefield(enable: boolean)
                     local humanoidRootPart = localPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if humanoidRootPart then
                         local forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
+                        local ffStartTime = tick()
+                        local hasFF = false
+
                         if forceField then
-                            -- Track FF duration
-                            local ffStartTime = tick()
+                            hasFF = true
+                            -- Wait for FF to almost expire
                             while forceField and State.ff.enabled do
-                                -- Pre-emptively restore position if FF is about to expire
-                                if (tick() - ffStartTime) > 2.8 then  -- FF usually lasts 3 seconds
-                                    if not State.ff.changingTeam and State.ff.lastPosition then
-                                        State.ff.changingTeam = true
-                                        
-                                        local teamEvent = workspace:FindFirstChild("Remote"):FindFirstChild("TeamEvent")
-                                        if teamEvent then
-                                            local savedPos = State.ff.lastPosition
-                                            local savedOri = State.ff.lastOrientation
-                                            
-                                            teamEvent:FireServer(Config.FF.TEAMS.ORANGE)
-                                            task.wait(0.3) -- Increased delay
-                                            teamEvent:FireServer(Config.FF.TEAMS.BLUE)
-                                            task.wait(0.3) -- Increased delay
-                                            
-                                            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                                                localPlayer.Character:MoveTo(savedPos)
-                                                localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(savedPos) * savedOri
-                                            end
-                                        end
-                                        State.ff.changingTeam = false
-                                        break
-                                    end
+                                if (tick() - ffStartTime) > 2.8 then -- FF about to expire
+                                    break
                                 end
                                 task.wait(0.03)
                                 forceField = localPlayer.Character:FindFirstChildOfClass("ForceField")
                             end
                         end
-                        
-                        if not State.ff.changingTeam and State.ff.lastPosition then
+
+                        -- Only switch teams if FF was active and is about to expire
+                        if hasFF and not State.ff.changingTeam and State.ff.lastPosition then
                             State.ff.changingTeam = true
                             
                             local teamEvent = workspace:FindFirstChild("Remote"):FindFirstChild("TeamEvent")
