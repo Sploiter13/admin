@@ -20,7 +20,8 @@ local State: StateType = {
     invis = {
         enabled = false,
         platform = nil,
-        savedPosition = nil
+        savedPosition = nil,
+        connections = {}
     },
     view = {
         enabled = false,
