@@ -23,17 +23,6 @@ local State = loadModuleSafe("state.lua") or {}
 
 local RunService = game:GetService("RunService")
 
--- Initialize State.ff if not present
-State.ff = State.ff or {
-    enabled = false,
-    mainLoop = nil,
-    positionConnection = nil,
-    changingTeam = false,
-    lastPosition = Vector3.new(),
-    lastCFrame = CFrame.new(),
-    lastVelocity = Vector3.new(),
-}
-
 -- Toggle Forcefield feature
 local function toggleForcefield(enable: boolean)
     local localPlayer = Services.Players.LocalPlayer
