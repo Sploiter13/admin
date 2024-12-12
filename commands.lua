@@ -89,8 +89,8 @@ local Commands = {
    invis = {
         description = "Enable Invisibility.",
          execute = function()
-            if Features.Invisibility and Features.Invisibility.toggle then
-            Features.Invisibility.toggle(true)
+            if Features.Invisibility and Features.Invisibility.toggleInvisibility then
+            Features.Invisibility.toggleInvisibility(true)
          else
             Errors.notify("Error", "Invisibility module not available")
             end
@@ -99,8 +99,8 @@ local Commands = {
     visible = {
         description = "Disable Invisibility.",
         execute = function()
-            if Features.Invisibility and Features.Invisibility.toggle then
-             Features.Invisibility.toggle(false)
+            if Features.Invisibility and Features.Invisibility.toggleInvisibility then
+             Features.Invisibility.toggleInvisibility(false)
          end
     end,
     },
