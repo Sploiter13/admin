@@ -40,82 +40,27 @@ local function toggleInvisibility(enable)
     if enable and not State.invis.enabled then
         local success, err = pcall(function()
             local character = LocalPlayer.Character
-            if not character then
-                return handleError(Errors.Types.CHARACTER, "Character not found")
-            end
-
+            if not character then return handleError(Errors.Types.CHARACTER, "Character not found") end
+            
             local hrp = character:WaitForChild("HumanoidRootPart")
             State.invis.savedPosition = hrp.Position
-
-            -- Create the platform at a high position
-            State.invis.platform = Instance.new("Part")
-            State.invis.platform.Size = Config.INVIS.PLATFORM_SIZE
-            State.invis.platform.Position = Vector3.new(0, Config.INVIS.PLATFORM_HEIGHT, 0)
-            State.invis.platform.Anchored = true
-            State.invis.platform.CanCollide = true
-            State.invis.platform.Transparency = 1
-            State.invis.platform.Parent = workspace
-
-            local touched = false
-            -- Connect to the platform's Touched event
-            State.invis.platform.Touched:Connect(function(hit)
-                if not touched and hit.Parent == character then
-                    touched = true
-
-                    task.spawn(function()
-                        local clone = hrp:Clone()
-                        task.wait(Config.INVIS.TELEPORT_DELAY)
-                        hrp:Destroy()
-                        clone.Parent = character
-                        character:MoveTo(State.invis.savedPosition)
-
-                        State.invis.enabled = true
-                        if State.invis.platform then
-                            State.invis.platform:Destroy()
-                            State.invis.platform = nil
-                        end
-
-                        notify("Invisibility", "Enabled")
-                    end)
-                end
-            end)
-
-            -- Move the character to the platform
-            character:MoveTo(State.invis.platform.Position + Vector3.new(0, 3, 0))
+            
+            -- Create physics impulse
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 1000, 0)
+            task.wait(0.1)
+            
+            -- Clone and swap
+            local clone = hrp:Clone()
+            clone.Parent = character
+            hrp:Destroy()
+            
+            character:MoveTo(State.invis.savedPosition)
+            State.invis.enabled = true
+            notify("Invisibility", "Enabled")
         end)
-
+        
         if not success then
             handleError(Errors.Types.CHARACTER, "Failed to enable invisibility", err)
-        end
-    elseif not enable and State.invis.enabled then
-        local success, err = pcall(function()
-            local player = LocalPlayer
-            local position = State.invis.savedPosition
-
-            if position then
-                -- Reset the character by setting health to zero
-                if player.Character then
-                    player.Character.Humanoid.Health = 0
-                end
-
-                local connection
-                connection = player.CharacterAdded:Connect(function(newCharacter)
-                    connection:Disconnect()
-                    task.wait(0.1)
-
-                    newCharacter:WaitForChild("HumanoidRootPart")
-                    newCharacter:MoveTo(position)
-
-                    State.invis.enabled = false
-                    State.invis.savedPosition = nil
-
-                    notify("Invisibility", "Disabled")
-                end)
-            end
-        end)
-
-        if not success then
-            handleError(Errors.Types.CHARACTER, "Failed to disable invisibility", err)
         end
     end
 end
