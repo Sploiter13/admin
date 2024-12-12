@@ -4,149 +4,129 @@
 local Services = _G.Services
 local Errors = _G.Errors
 local State = _G.State
+local Config = _G.Config
 
 -- Check that core modules are loaded
-if not Services or not Errors or not State then
+if not Services or not Errors or not State or not Config then
     error("[Invisibility] Core modules not loaded.")
 end
 
-local RunService = game:GetService("RunService")
 local Players = Services.Players or game:GetService("Players")
+local workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
 -- Initialize State.invis if not present
 State.invis = State.invis or {
     enabled = false,
-    connections = {},
-    originalTransparency = {},
-    originalCanCollide = {},
-    originalEnabled = {}
+    platform = nil,
+    savedPosition = nil
 }
 
--- Function to make character invisible
-local function makeCharacterInvisible(character)
-    for _, part in pairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            State.invis.originalTransparency[part] = part.Transparency
-            State.invis.originalCanCollide[part] = part.CanCollide
-            part.Transparency = 1
-            part.CanCollide = false
-        elseif part:IsA("Decal") or part:IsA("Texture") then
-            State.invis.originalTransparency[part] = part.Transparency
-            part.Transparency = 1
-        elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
-            State.invis.originalEnabled = State.invis.originalEnabled or {}
-            State.invis.originalEnabled[part] = part.Enabled
-            part.Enabled = false
-        end
+-- Default configuration values if not set in Config
+Config.INVIS = Config.INVIS or {
+    PLATFORM_SIZE = Vector3.new(5, 1, 5),
+    PLATFORM_HEIGHT = 500,
+    TELEPORT_DELAY = 0.1
+}
+
+-- Helper functions
+local function notify(title, message)
+    if Errors and Errors.notify then
+        Errors.notify(title, message)
+    else
+        print(string.format("[%s] %s", title, message))
     end
 end
 
--- Function to restore character's original appearance
-local function restoreCharacterAppearance(character)
-    for part, transparency in pairs(State.invis.originalTransparency) do
-        if part and part.Parent then
-            part.Transparency = transparency
-        end
+local function handleError(errorType, message, err)
+    if Errors and Errors.handleError then
+        Errors.handleError(errorType, message, err)
+    else
+        warn(string.format("[Error] %s: %s", message, tostring(err)))
     end
-    for part, canCollide in pairs(State.invis.originalCanCollide) do
-        if part and part.Parent and part:IsA("BasePart") then
-            part.CanCollide = canCollide
-        end
-    end
-    if State.invis.originalEnabled then
-        for part, enabled in pairs(State.invis.originalEnabled) do
-            if part and part.Parent then
-                part.Enabled = enabled
-            end
-        end
-    end
-    -- Clear stored properties
-    State.invis.originalTransparency = {}
-    State.invis.originalCanCollide = {}
-    State.invis.originalEnabled = {}
 end
 
--- Function to clean up invisibility state
-local function cleanup()
-    -- Disconnect any connections
-    for _, connection in pairs(State.invis.connections) do
-        if connection and connection.Disconnect then
-            connection:Disconnect()
-        end
-    end
-    State.invis.connections = {}
-
-    -- Restore character appearance
-    local character = LocalPlayer.Character
-    if character then
-        restoreCharacterAppearance(character)
-    end
-
-    State.invis.enabled = false
-end
-
+-- The toggleInvisibility function as provided
 local function toggleInvisibility(enable)
     if enable and not State.invis.enabled then
         local success, err = pcall(function()
             local character = LocalPlayer.Character
             if not character then
-                error("Character not found")
+                return handleError(Errors.Types.CHARACTER, "Character not found")
             end
 
-            -- Make character invisible
-            makeCharacterInvisible(character)
+            local hrp = character:WaitForChild("HumanoidRootPart")
+            State.invis.savedPosition = hrp.Position
 
-            -- Listen for character added (in case of death or respawn)
-            local characterAddedConn
-            characterAddedConn = LocalPlayer.CharacterAdded:Connect(function(newCharacter)
-                -- Cleanup and reapply invisibility to new character
-                restoreCharacterAppearance(character)
-                makeCharacterInvisible(newCharacter)
-                character = newCharacter
-            end)
-            table.insert(State.invis.connections, characterAddedConn)
+            -- Create the platform at a high position
+            State.invis.platform = Instance.new("Part")
+            State.invis.platform.Size = Config.INVIS.PLATFORM_SIZE
+            State.invis.platform.Position = Vector3.new(0, Config.INVIS.PLATFORM_HEIGHT, 0)
+            State.invis.platform.Anchored = true
+            State.invis.platform.CanCollide = true
+            State.invis.platform.Transparency = 1
+            State.invis.platform.Parent = workspace
 
-            -- Handle character's descendants added (for new parts)
-            local descendantAddedConn
-            descendantAddedConn = character.DescendantAdded:Connect(function(descendant)
-                task.wait()
-                if State.invis.enabled then
-                    if descendant:IsA("BasePart") then
-                        State.invis.originalTransparency[descendant] = descendant.Transparency
-                        State.invis.originalCanCollide[descendant] = descendant.CanCollide
-                        descendant.Transparency = 1
-                        descendant.CanCollide = false
-                    elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
-                        State.invis.originalTransparency[descendant] = descendant.Transparency
-                        descendant.Transparency = 1
-                    elseif descendant:IsA("ParticleEmitter") or descendant:IsA("Trail") then
-                        State.invis.originalEnabled = State.invis.originalEnabled or {}
-                        State.invis.originalEnabled[descendant] = descendant.Enabled
-                        descendant.Enabled = false
-                    end
+            local touched = false
+            -- Connect to the platform's Touched event
+            State.invis.platform.Touched:Connect(function(hit)
+                if not touched and hit.Parent == character then
+                    touched = true
+
+                    task.spawn(function()
+                        local clone = hrp:Clone()
+                        task.wait(Config.INVIS.TELEPORT_DELAY)
+                        hrp:Destroy()
+                        clone.Parent = character
+                        character:MoveTo(State.invis.savedPosition)
+
+                        State.invis.enabled = true
+                        if State.invis.platform then
+                            State.invis.platform:Destroy()
+                            State.invis.platform = nil
+                        end
+
+                        notify("Invisibility", "Enabled")
+                    end)
                 end
             end)
-            table.insert(State.invis.connections, descendantAddedConn)
 
-            State.invis.enabled = true
-            Errors.notify("Invisibility", "Enabled - You are now invisible")
+            -- Move the character to the platform
+            character:MoveTo(State.invis.platform.Position + Vector3.new(0, 3, 0))
         end)
 
         if not success then
-            Errors.handleError(Errors.Types.EXCEPTION, err)
-            cleanup()
+            handleError(Errors.Types.CHARACTER, "Failed to enable invisibility", err)
         end
-
     elseif not enable and State.invis.enabled then
         local success, err = pcall(function()
-            -- Cleanup invisibility state
-            cleanup()
-            Errors.notify("Invisibility", "Disabled - You are now visible")
+            local player = LocalPlayer
+            local position = State.invis.savedPosition
+
+            if position then
+                -- Reset the character by setting health to zero
+                if player.Character then
+                    player.Character.Humanoid.Health = 0
+                end
+
+                local connection
+                connection = player.CharacterAdded:Connect(function(newCharacter)
+                    connection:Disconnect()
+                    task.wait(0.1)
+
+                    newCharacter:WaitForChild("HumanoidRootPart")
+                    newCharacter:MoveTo(position)
+
+                    State.invis.enabled = false
+                    State.invis.savedPosition = nil
+
+                    notify("Invisibility", "Disabled")
+                end)
+            end
         end)
 
         if not success then
-            Errors.handleError(Errors.Types.EXCEPTION, err)
+            handleError(Errors.Types.CHARACTER, "Failed to disable invisibility", err)
         end
     end
 end
