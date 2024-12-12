@@ -1,10 +1,13 @@
 -- features/invisibility.lua
 
 -- Dependencies (Assuming these are already loaded globally)
-local Services = _G.Services
-local Errors = _G.Errors
-local State = _G.State
-local Config = _G.Config
+local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
+
+local Services = loadstring(game:HttpGet(BASE_URL .. "services.lua"))()
+local Config = loadstring(game:HttpGet(BASE_URL .. "config.lua"))()
+local Errors = loadstring(game:HttpGet(BASE_URL .. "errors.lua"))()
+local Utils = loadstring(game:HttpGet(BASE_URL .. "utils.lua"))()
+local State = loadstring(game:HttpGet(BASE_URL .. "state.lua"))()
 
 -- Check that core modules are loaded
 if not Services or not Errors or not State or not Config then
