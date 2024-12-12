@@ -45,13 +45,13 @@ local function toggleInvisibility(enable)
             local hrp = character:WaitForChild("HumanoidRootPart")
             State.invis.savedPosition = hrp.Position
             
-            -- Create physics impulse
-            hrp.AssemblyLinearVelocity = Vector3.new(0, 1000, 0)
-            task.wait(0.1)
-            
-            -- Clone and swap
+            -- Clone primary parts
             local clone = hrp:Clone()
             clone.Parent = character
+            
+            -- Break physics replication
+            hrp.AssemblyLinearVelocity = Vector3.new(math.huge, math.huge, math.huge)
+            task.wait(0.1)
             hrp:Destroy()
             
             character:MoveTo(State.invis.savedPosition)
