@@ -45,16 +45,23 @@ local function toggleInvisibility(enable)
             local hrp = character:WaitForChild("HumanoidRootPart")
             State.invis.savedPosition = hrp.Position
             
-            -- Clone primary parts
-            local clone = hrp:Clone()
-            clone.Parent = character
+            -- Create network ownership changes
+            local part = Instance.new("Part")
+            part.Anchored = false
+            part.CanCollide = false
+            part.Transparency = 1
+            part.Position = hrp.Position + Vector3.new(0, 500, 0)
+            part.Parent = workspace
             
-            -- Break physics replication
-            hrp.AssemblyLinearVelocity = Vector3.new(math.huge, math.huge, math.huge)
+            -- Trigger network ownership change
+            hrp.CFrame = part.CFrame
             task.wait(0.1)
-            hrp:Destroy()
+            hrp.Velocity = Vector3.new(0, -1000, 0) 
+            task.wait(0.1)
             
             character:MoveTo(State.invis.savedPosition)
+            part:Destroy()
+            
             State.invis.enabled = true
             notify("Invisibility", "Enabled")
         end)
