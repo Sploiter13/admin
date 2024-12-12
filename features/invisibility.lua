@@ -41,35 +41,50 @@ local function toggleInvisibility(enable)
         local success, err = pcall(function()
             local character = LocalPlayer.Character
             if not character then
-                return handleError(Errors.Types.CHARACTER, "Character not found")
+                handleError(Errors.Types.CHARACTER, "Character not found")
+                return
             end
 
-            local hrp = character:WaitForChild("HumanoidRootPart")
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            if not hrp then
+                handleError(Errors.Types.CHARACTER, "HumanoidRootPart not found")
+                return
+            end
+
             State.invis.savedPosition = hrp.Position
 
-            -- Create the platform at a high position
+            -- Create the platform near the character to prevent being thrown into the air
             State.invis.platform = Instance.new("Part")
             State.invis.platform.Size = Config.INVIS.PLATFORM_SIZE
-            State.invis.platform.Position = Vector3.new(0, Config.INVIS.PLATFORM_HEIGHT, 0)
+            -- Position the platform slightly above the character to facilitate smooth teleportation
+            State.invis.platform.Position = hrp.Position + Vector3.new(0, Config.INVIS.PLATFORM_HEIGHT, 0)
             State.invis.platform.Anchored = true
-            State.invis.platform.CanCollide = true
-            State.invis.platform.Transparency = 1
+            State.invis.platform.CanCollide = false -- Prevent any collision-related physics issues
+            State.invis.platform.Transparency = 1 -- Make the platform invisible
             State.invis.platform.Parent = workspace
 
             local touched = false
-            -- Connect to the platform's Touched event
-            State.invis.platform.Touched:Connect(function(hit)
+
+            -- Define the touch handler function
+            local function onTouched(hit)
                 if not touched and hit.Parent == character then
                     touched = true
+
+                    -- Disconnect the Touched event to prevent multiple triggers
+                    if State.invis.platform and State.invis.platform:FindFirstChildOfClass("Touched") then
+                        State.invis.platform.Touched:Disconnect()
+                    end
 
                     task.spawn(function()
                         local clone = hrp:Clone()
                         task.wait(Config.INVIS.TELEPORT_DELAY)
                         hrp:Destroy()
                         clone.Parent = character
-                        character:MoveTo(State.invis.savedPosition)
+                        clone.Name = "HumanoidRootPart" -- Ensure the clone has the correct name
+                        character:SetPrimaryPartCFrame(CFrame.new(State.invis.savedPosition))
 
                         State.invis.enabled = true
+
                         if State.invis.platform then
                             State.invis.platform:Destroy()
                             State.invis.platform = nil
@@ -78,10 +93,14 @@ local function toggleInvisibility(enable)
                         notify("Invisibility", "Enabled")
                     end)
                 end
-            end)
+            end
 
-            -- Move the character to the platform
-            character:MoveTo(State.invis.platform.Position + Vector3.new(0, 3, 0))
+            -- Connect the Touched event and store the connection for later disconnection
+            local touchedConn = State.invis.platform.Touched:Connect(onTouched)
+            table.insert(State.invis.connections, touchedConn)
+
+            -- Move the character slightly to trigger the Touched event
+            character:SetPrimaryPartCFrame(CFrame.new(State.invis.platform.Position + Vector3.new(0, -3, 0)))
         end)
 
         if not success then
@@ -93,24 +112,32 @@ local function toggleInvisibility(enable)
             local position = State.invis.savedPosition
 
             if position then
-                -- Reset the character by setting health to zero
-                if player.Character then
+                -- Reset the character by setting health to zero to trigger respawn
+                if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
                     player.Character.Humanoid.Health = 0
+                else
+                    handleError(Errors.Types.CHARACTER, "Humanoid not found on character")
+                    return
                 end
 
+                -- Connect to CharacterAdded to restore position after respawn
                 local connection
                 connection = player.CharacterAdded:Connect(function(newCharacter)
-                    connection:Disconnect()
-                    task.wait(0.1)
+                    connection:Disconnect() -- Disconnect after first trigger
+                    task.wait(0.5) -- Wait to ensure the new character is fully loaded
 
-                    newCharacter:WaitForChild("HumanoidRootPart")
-                    newCharacter:MoveTo(position)
+                    local newHRP = newCharacter:WaitForChild("HumanoidRootPart")
+                    newCharacter:SetPrimaryPartCFrame(CFrame.new(position))
 
                     State.invis.enabled = false
                     State.invis.savedPosition = nil
 
                     notify("Invisibility", "Disabled")
                 end)
+
+                table.insert(State.invis.connections, connection)
+            else
+                handleError(Errors.Types.CHARACTER, "Saved position not found")
             end
         end)
 
@@ -119,7 +146,6 @@ local function toggleInvisibility(enable)
         end
     end
 end
-
 return {
     toggleInvisibility = toggleInvisibility
 }
