@@ -15,20 +15,6 @@ local Players = Services.Players or game:GetService("Players")
 local workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Initialize State.invis if not present
-State.invis = State.invis or {
-    enabled = false,
-    platform = nil,
-    savedPosition = nil
-}
-
--- Default configuration values if not set in Config
-Config.INVIS = Config.INVIS or {
-    PLATFORM_SIZE = Vector3.new(5, 1, 5),
-    PLATFORM_HEIGHT = 500,
-    TELEPORT_DELAY = 0.1
-}
-
 -- Helper functions
 local function notify(title, message)
     if Errors and Errors.notify then
