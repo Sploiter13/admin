@@ -14,6 +14,19 @@ if not Services or not Errors or not State or not Config then
     error("[Invisibility] Core modules not loaded.")
 end
 
+local INVIS_CONFIG = {
+    PLATFORM_SIZE = Vector3.new(5, 1, 5), -- Adjust as needed
+    PLATFORM_HEIGHT = 10, -- Height offset for the platform
+    TELEPORT_DELAY = 0.1 -- Delay before teleporting back
+}
+
+State.invis = State.invis or {
+    enabled = false,
+    platform = nil,
+    savedPosition = nil,
+    connections = {} -- Initialize connections as an empty table
+}
+
 local Players = Services.Players or game:GetService("Players")
 local workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
@@ -36,6 +49,15 @@ local function handleError(errorType, message, err)
 end
 
 -- The toggleInvisibility function as provided
+local function cleanupInvisibility()
+    for _, conn in ipairs(State.invis.connections or {}) do
+        if conn and conn.Disconnect then
+            conn:Disconnect()
+        end
+    end
+    State.invis.connections = {}
+end
+
 local function toggleInvisibility(enable)
     if enable and not State.invis.enabled then
         local success, err = pcall(function()
@@ -55,9 +77,9 @@ local function toggleInvisibility(enable)
 
             -- Create the platform near the character to prevent being thrown into the air
             State.invis.platform = Instance.new("Part")
-            State.invis.platform.Size = Config.INVIS.PLATFORM_SIZE
+            State.invis.platform.Size = INVIS_CONFIG.PLATFORM_SIZE
             -- Position the platform slightly above the character to facilitate smooth teleportation
-            State.invis.platform.Position = hrp.Position + Vector3.new(0, Config.INVIS.PLATFORM_HEIGHT, 0)
+            State.invis.platform.Position = hrp.Position + Vector3.new(0, INVIS_CONFIG.PLATFORM_HEIGHT, 0)
             State.invis.platform.Anchored = true
             State.invis.platform.CanCollide = false -- Prevent any collision-related physics issues
             State.invis.platform.Transparency = 1 -- Make the platform invisible
@@ -65,19 +87,19 @@ local function toggleInvisibility(enable)
 
             local touched = false
 
-            -- Define the touch handler function
+            -- Define the touch handler function with access to touchedConn
             local function onTouched(hit)
                 if not touched and hit.Parent == character then
                     touched = true
 
                     -- Disconnect the Touched event to prevent multiple triggers
-                    if State.invis.platform and State.invis.platform:FindFirstChildOfClass("Touched") then
-                        State.invis.platform.Touched:Disconnect()
+                    if touchedConn then
+                        touchedConn:Disconnect()
                     end
 
                     task.spawn(function()
                         local clone = hrp:Clone()
-                        task.wait(Config.INVIS.TELEPORT_DELAY)
+                        task.wait(INVIS_CONFIG.TELEPORT_DELAY)
                         hrp:Destroy()
                         clone.Parent = character
                         clone.Name = "HumanoidRootPart" -- Ensure the clone has the correct name
@@ -97,6 +119,7 @@ local function toggleInvisibility(enable)
 
             -- Connect the Touched event and store the connection for later disconnection
             local touchedConn = State.invis.platform.Touched:Connect(onTouched)
+            State.invis.connections = State.invis.connections or {}
             table.insert(State.invis.connections, touchedConn)
 
             -- Move the character slightly to trigger the Touched event
@@ -105,6 +128,7 @@ local function toggleInvisibility(enable)
 
         if not success then
             handleError(Errors.Types.CHARACTER, "Failed to enable invisibility", err)
+            cleanupInvisibility()
         end
     elseif not enable and State.invis.enabled then
         local success, err = pcall(function()
@@ -120,10 +144,10 @@ local function toggleInvisibility(enable)
                     return
                 end
 
-                -- Connect to CharacterAdded to restore position after respawn
-                local connection
-                connection = player.CharacterAdded:Connect(function(newCharacter)
-                    connection:Disconnect() -- Disconnect after first trigger
+                -- Define the CharacterAdded handler with access to the connection
+                local function onCharacterAdded(newCharacter)
+                    -- Disconnect this connection immediately after it's triggered
+                    connection:Disconnect()
                     task.wait(0.5) -- Wait to ensure the new character is fully loaded
 
                     local newHRP = newCharacter:WaitForChild("HumanoidRootPart")
@@ -133,8 +157,11 @@ local function toggleInvisibility(enable)
                     State.invis.savedPosition = nil
 
                     notify("Invisibility", "Disabled")
-                end)
+                end
 
+                -- Connect the CharacterAdded event and store the connection for cleanup
+                local connection = player.CharacterAdded:Connect(onCharacterAdded)
+                State.invis.connections = State.invis.connections or {}
                 table.insert(State.invis.connections, connection)
             else
                 handleError(Errors.Types.CHARACTER, "Saved position not found")
@@ -143,9 +170,14 @@ local function toggleInvisibility(enable)
 
         if not success then
             handleError(Errors.Types.CHARACTER, "Failed to disable invisibility", err)
+            cleanupInvisibility()
         end
+    else
+        -- Handle cases where the function is called with the same state
+        notify("Invisibility", "Already in the desired state.")
     end
 end
+
 return {
     toggleInvisibility = toggleInvisibility
 }
