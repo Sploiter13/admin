@@ -1,5 +1,10 @@
+-- features/invisibility.lua
+
 local BASE_URL = "https://raw.githubusercontent.com/Sploiter13/admin/main/"
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local workspace = game:GetService("Workspace")
 
 -- Load core modules with verification
 local function loadModuleSafe(path)
@@ -10,7 +15,7 @@ local function loadModuleSafe(path)
         warn("Failed to load: " .. path)
         return nil
     end
-    task.wait(0.1)
+    task.wait(0.1) -- Small delay to ensure module stability
     return result
 end
 
@@ -24,10 +29,30 @@ local State = loadModuleSafe("state.lua") or {}
 State.invis = State.invis or {
     enabled = false,
     platform = nil,
-    savedPosition = nil,
     savedCFrame = nil,
-    updateConnection = nil
+    updateConnection = nil,
+    characterConnection = nil
 }
+
+-- Function to clean up invisibility state
+local function cleanup()
+    if State.invis.updateConnection then
+        State.invis.updateConnection:Disconnect()
+        State.invis.updateConnection = nil
+    end
+
+    if State.invis.characterConnection then
+        State.invis.characterConnection:Disconnect()
+        State.invis.characterConnection = nil
+    end
+
+    if State.invis.platform then
+        State.invis.platform:Destroy()
+        State.invis.platform = nil
+    end
+
+    State.invis.enabled = false
+end
 
 local function toggleInvisibility(enable: boolean)
     if enable and not State.invis.enabled then
@@ -38,25 +63,42 @@ local function toggleInvisibility(enable: boolean)
             end
 
             local hrp = character:WaitForChild("HumanoidRootPart")
-            
-            -- Start position tracking
-            State.invis.updateConnection = RunService.Heartbeat:Connect(function()
-                if character and character:FindFirstChild("HumanoidRootPart") then
-                    State.invis.savedPosition = hrp.Position
-                    State.invis.savedCFrame = hrp.CFrame
-                end
-            end)
-            
+            if not hrp then
+                return Errors.handleError(Errors.Types.CHARACTER, "HumanoidRootPart not found")
+            end
+
+            -- Save current CFrame
+            State.invis.savedCFrame = hrp.CFrame
+
+            -- Create and position the platform at the character's current position
             State.invis.platform = Instance.new("Part")
             State.invis.platform.Size = Vector3.new(1, 1, 1)
             State.invis.platform.Transparency = 1
             State.invis.platform.CanCollide = false
             State.invis.platform.Anchored = true
+            State.invis.platform.CFrame = hrp.CFrame -- Position platform at character's location
             State.invis.platform.Parent = workspace
+
+            -- Teleport character slightly upwards to avoid physics glitches
+            hrp.CFrame = hrp.CFrame + Vector3.new(0, 1, 0)
             
-            hrp.CFrame = State.invis.platform.CFrame
+            -- Start position tracking
+            State.invis.updateConnection = RunService.Heartbeat:Connect(function()
+                if character and character:FindFirstChild("HumanoidRootPart") then
+                    State.invis.savedCFrame = hrp.CFrame
+                end
+            end)
+
+            -- Handle character death or respawn
+            State.invis.characterConnection = Services.Players.LocalPlayer.CharacterAdded:Connect(function(newCharacter)
+                if State.invis.enabled then
+                    cleanup()
+                    task.wait(0.1)
+                    toggleInvisibility(false)
+                end
+            end)
+
             State.invis.enabled = true
-            
             Errors.notify("Invisibility", "Enabled - Position tracking started")
         end)
 
@@ -65,27 +107,18 @@ local function toggleInvisibility(enable: boolean)
         end
     elseif not enable and State.invis.enabled then
         local success, err = pcall(function()
-            -- Cleanup tracking connection
-            if State.invis.updateConnection then
-                State.invis.updateConnection:Disconnect()
-                State.invis.updateConnection = nil
-            end
+            -- Cleanup tracking connections
+            cleanup()
 
             local character = Services.Players.LocalPlayer.Character
             if character then
                 local hrp = character:FindFirstChild("HumanoidRootPart")
                 if hrp and State.invis.savedCFrame then
-                    -- Restore last saved position
-                    hrp.CFrame = State.invis.savedCFrame
+                    -- Restore the last saved position
+                    hrp.CFrame = State.invis.savedCFrame + Vector3.new(0, 1, 0) -- Ensure slight offset to prevent glitches
                 end
             end
 
-            if State.invis.platform then
-                State.invis.platform:Destroy()
-                State.invis.platform = nil
-            end
-
-            State.invis.enabled = false
             Errors.notify("Invisibility", "Disabled - Position restored")
         end)
 
