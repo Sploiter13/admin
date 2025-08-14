@@ -1,1373 +1,847 @@
--- Severe UI Library
--- Built for Severe External with Luau support
--- Uses Severe's Drawing API for rendering
-
+-- UI Library Core
 local Library = {}
-Library.__index = Library
+local UI_ELEMENTS = {}
+local DRAGGING_UI = nil
+local DRAG_OFFSET_X = 0
+local DRAG_OFFSET_Y = 0
+local UI_ZINDEX_BASE = 1000 -- Base ZIndex for UI elements to appear on top
 
--- Constants
-local COLORS = {
-    Background = {25, 25, 25},
-    Secondary = {35, 35, 35},
-    Border = {55, 55, 55},
-    Text = {255, 255, 255},
-    TextDark = {180, 180, 180},
-    Accent = {0, 162, 255},
-    Success = {76, 175, 80},
-    Warning = {255, 193, 7},
-    Error = {244, 67, 54}
-}
-
-local FONTS = {
-    Regular = 2,
-    Bold = 3,
-    Light = 1
-}
-
-local KEYCODES = {
-    [8] = "Backspace", [9] = "Tab", [13] = "Enter", [16] = "Shift", [17] = "Ctrl",
-    [18] = "Alt", [19] = "Pause", [20] = "CapsLock", [27] = "Escape", [32] = "Space",
-    [33] = "PageUp", [34] = "PageDown", [35] = "End", [36] = "Home", [37] = "Left",
-    [38] = "Up", [39] = "Right", [40] = "Down", [45] = "Insert", [46] = "Delete",
-    [48] = "Zero", [49] = "One", [50] = "Two", [51] = "Three", [52] = "Four",
-    [53] = "Five", [54] = "Six", [55] = "Seven", [56] = "Eight", [57] = "Nine",
-    [65] = "A", [66] = "B", [67] = "C", [68] = "D", [69] = "E", [70] = "F",
-    [71] = "G", [72] = "H", [73] = "I", [74] = "J", [75] = "K", [76] = "L",
-    [77] = "M", [78] = "N", [79] = "O", [80] = "P", [81] = "Q", [82] = "R",
-    [83] = "S", [84] = "T", [85] = "U", [86] = "V", [87] = "W", [88] = "X",
-    [89] = "Y", [90] = "Z", [112] = "F1", [113] = "F2", [114] = "F3", [115] = "F4",
-    [116] = "F5", [117] = "F6", [118] = "F7", [119] = "F8", [120] = "F9", [121] = "F10",
-    [122] = "F11", [123] = "F12"
-}
-
--- Utility Functions
-local function lerp(a, b, t)
-    return a + (b - a) * t
+-- Helper function to check if a point is inside a rectangle
+local function is_point_in_rect(px, py, rx, ry, rw, rh)
+    return px >= rx and px <= rx + rw and py >= ry and py <= ry + rh
 end
 
-local function pointInRect(px, py, x, y, w, h)
-    return px >= x and px <= x + w and py >= y and py <= y + h
+-- Helper function to get text dimensions (approximation, as TextBounds is readonly)
+-- This is a very rough approximation. A real UI would need a more sophisticated text measurement.
+local function get_text_dimensions(text_str, font_size)
+    -- These are arbitrary values for demonstration.
+    -- In a real scenario, you'd need to pre-calculate or have a way to query actual text bounds.
+    local char_width = font_size * 0.6
+    local char_height = font_size * 1.2
+    return #text_str * char_width, char_height
 end
 
-local function splitText(text, maxWidth, font, size)
-    local words = {}
-    for word in string.gmatch(text, "%S+") do
-        table.insert(words, word)
+-- Base UI Element Class
+local UIElement = {}
+UIElement.__index = UIElement
+
+function UIElement:new(props)
+    local o = {
+        Name = props.Name or "Unnamed Element",
+        Visible = true,
+        ZIndex = UI_ZINDEX_BASE,
+        Position = props.Position or {0, 0},
+        Size = props.Size or {100, 20},
+        Color = props.Color or {50, 50, 50},
+        Opacity = props.Opacity or 1,
+        Parent = props.Parent,
+        Children = {},
+        DrawingObjects = {}, -- Store Drawing library objects
+        Type = "UIElement"
+    }
+    setmetatable(o, self)
+    table.insert(UI_ELEMENTS, o)
+    return o
+end
+
+function UIElement:SetVisible(state)
+    self.Visible = state
+    for _, obj in pairs(self.DrawingObjects) do
+        obj.Visible = state
     end
-    
-    local lines = {}
-    local currentLine = ""
-    
-    for _, word in ipairs(words) do
-        local testLine = currentLine == "" and word or currentLine .. " " .. word
-        -- Approximate text width calculation
-        local textWidth = #testLine * (size * 0.6)
-        
-        if textWidth <= maxWidth then
-            currentLine = testLine
-        else
-            if currentLine ~= "" then
-                table.insert(lines, currentLine)
-                currentLine = word
-            else
-                table.insert(lines, word)
+    for _, child in pairs(self.Children) do
+        child:SetVisible(state)
+    end
+end
+
+function UIElement:SetPosition(x, y)
+    local dx = x - self.Position[1]
+    local dy = y - self.Position[2]
+    self.Position = {x, y}
+    -- Update positions of drawing objects
+    for _, obj in pairs(self.DrawingObjects) do
+        if obj.Position then
+            obj.Position = {obj.Position[1] + dx, obj.Position[2] + dy}
+        elseif obj.From and obj.To then
+            obj.From = {obj.From[1] + dx, obj.From[2] + dy}
+            obj.To = {obj.To[1] + dx, obj.To[2] + dy}
+        elseif obj.PointA then -- For Quad/Triangle
+            obj.PointA = {obj.PointA[1] + dx, obj.PointA[2] + dy}
+            obj.PointB = {obj.PointB[1] + dx, obj.PointB[2] + dy}
+            obj.PointC = {obj.PointC[1] + dx, obj.PointC[2] + dy}
+            if obj.PointD then
+                obj.PointD = {obj.PointD[1] + dx, obj.PointD[2] + dy}
             end
         end
     end
-    
-    if currentLine ~= "" then
-        table.insert(lines, currentLine)
+    -- Recursively update children
+    for _, child in pairs(self.Children) do
+        child:SetPosition(child.Position[1] + dx, child.Position[2] + dy)
     end
-    
-    return lines
 end
 
--- Animation System
-local Animations = {}
-Animations.__index = Animations
-
-function Animations.new()
-    return setmetatable({
-        tweens = {},
-        lastTime = tick()
-    }, Animations)
-end
-
-function Animations:add(target, property, endValue, duration, easing)
-    local tween = {
-        target = target,
-        property = property,
-        startValue = target[property] or 0,
-        endValue = endValue,
-        duration = duration or 0.3,
-        startTime = tick(),
-        easing = easing or "linear"
-    }
-    
-    table.insert(self.tweens, tween)
-    return tween
-end
-
-function Animations:update()
-    local currentTime = tick()
-    
-    for i = #self.tweens, 1, -1 do
-        local tween = self.tweens[i]
-        local elapsed = currentTime - tween.startTime
-        local progress = math.min(elapsed / tween.duration, 1)
-        
-        -- Apply easing
-        local easedProgress = progress
-        if tween.easing == "ease-out" then
-            easedProgress = 1 - (1 - progress) ^ 2
-        elseif tween.easing == "ease-in" then
-            easedProgress = progress ^ 2
-        end
-        
-        tween.target[tween.property] = lerp(tween.startValue, tween.endValue, easedProgress)
-        
-        if progress >= 1 then
-            table.remove(self.tweens, i)
+function UIElement:Remove()
+    for _, obj in pairs(self.DrawingObjects) do
+        obj:Remove()
+    end
+    for _, child in pairs(self.Children) do
+        child:Remove()
+    end
+    -- Remove from global UI_ELEMENTS table
+    for i, v in ipairs(UI_ELEMENTS) do
+        if v == self then
+            table.remove(UI_ELEMENTS, i)
+            break
         end
     end
 end
 
--- Global animation manager
-local animationManager = Animations.new()
+-- Library Class
+local UILibrary = UIElement:new({
+    Name = "Severe UI",
+    Position = {100, 100},
+    Size = {600, 400},
+    Color = {30, 30, 30},
+    Opacity = 0.9,
+    Type = "Library"
+})
 
--- Notification System
-local NotificationSystem = {}
-NotificationSystem.__index = NotificationSystem
+function UILibrary:Create(props)
+    local lib = UILibrary:new(props)
+    lib.Name = props.Name or "Severe UI"
+    lib.Position = {100, 100}
+    lib.Size = {600, 400}
+    lib.Color = {30, 30, 30}
+    lib.Opacity = 0.9
 
-function NotificationSystem.new()
-    return setmetatable({
-        notifications = {},
-        yOffset = 50
-    }, NotificationSystem)
+    -- Draw the main window background
+    lib.DrawingObjects.background = Drawing.new("Square")
+    lib.DrawingObjects.background.Position = lib.Position
+    lib.DrawingObjects.background.Size = lib.Size
+    lib.DrawingObjects.background.Color = lib.Color
+    lib.DrawingObjects.background.Opacity = lib.Opacity
+    lib.DrawingObjects.background.Filled = true
+    lib.DrawingObjects.background.ZIndex = lib.ZIndex
+
+    -- Draw the title bar
+    lib.DrawingObjects.title_bar = Drawing.new("Square")
+    lib.DrawingObjects.title_bar.Position = lib.Position
+    lib.DrawingObjects.title_bar.Size = {lib.Size[1], 25}
+    lib.DrawingObjects.title_bar.Color = {40, 40, 40}
+    lib.DrawingObjects.title_bar.Opacity = 1
+    lib.DrawingObjects.title_bar.Filled = true
+    lib.DrawingObjects.title_bar.ZIndex = lib.ZIndex + 1
+
+    -- Draw the title text
+    lib.DrawingObjects.title_text = Drawing.new("Text")
+    lib.DrawingObjects.title_text.Text = lib.Name
+    lib.DrawingObjects.title_text.Position = {lib.Position[1] + 5, lib.Position[2] + 5}
+    lib.DrawingObjects.title_text.Color = {255, 255, 255}
+    lib.DrawingObjects.title_text.Size = 16
+    lib.DrawingObjects.title_text.ZIndex = lib.ZIndex + 2
+
+    lib.CurrentTab = nil
+    lib.TabOffset = 0
+    lib.SectionOffset = 0
+
+    -- Draggable logic
+    spawn(function()
+        while true do
+            local mouse_x, mouse_y = getmouseposition()
+            local title_bar_x, title_bar_y = lib.DrawingObjects.title_bar.Position[1], lib.DrawingObjects.title_bar.Position[2]
+            local title_bar_w, title_bar_h = lib.DrawingObjects.title_bar.Size[1], lib.DrawingObjects.title_bar.Size[2]
+
+            if is_point_in_rect(mouse_x, mouse_y, title_bar_x, title_bar_y, title_bar_w, title_bar_h) and isleftpressed() then
+                if not DRAGGING_UI then
+                    DRAGGING_UI = lib
+                    DRAG_OFFSET_X = mouse_x - lib.Position[1]
+                    DRAG_OFFSET_Y = mouse_y - lib.Position[2]
+                end
+            elseif not isleftpressed() then
+                DRAGGING_UI = nil
+            end
+
+            if DRAGGING_UI == lib then
+                lib:SetPosition(mouse_x - DRAG_OFFSET_X, mouse_y - DRAG_OFFSET_Y)
+            end
+            wait()
+        end
+    end)
+
+    return lib
 end
 
-function NotificationSystem:show(text, type, duration)
-    local screenX, screenY = getscreendimensions()
-    local notification = {
-        text = text,
-        type = type or "info",
-        duration = duration or 3,
-        startTime = tick(),
-        x = screenX - 320,
-        y = self.yOffset,
-        alpha = 0,
-        elements = {}
-    }
-    
-    -- Create visual elements
-    local bg = Drawing.new("Square")
-    bg.Size = {300, 60}
-    bg.Position = {notification.x, notification.y}
-    bg.Color = type == "error" and COLORS.Error or type == "success" and COLORS.Success or COLORS.Secondary
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 1000
-    
-    local border = Drawing.new("Square")
-    border.Size = {300, 60}
-    border.Position = {notification.x, notification.y}
-    border.Color = COLORS.Border
-    border.Thickness = 1
-    border.Filled = false
-    border.Visible = true
-    border.ZIndex = 1001
-    
-    local textObj = Drawing.new("Text")
-    textObj.Text = text
-    textObj.Font = FONTS.Regular
-    textObj.Size = 14
-    textObj.Position = {notification.x + 10, notification.y + 20}
-    textObj.Color = COLORS.Text
-    textObj.Visible = true
-    textObj.ZIndex = 1002
-    
-    notification.elements = {bg, border, textObj}
-    
-    -- Animate in
-    animationManager:add(notification, "alpha", 1, 0.3, "ease-out")
-    
-    table.insert(self.notifications, notification)
-    self.yOffset = self.yOffset + 70
-    
-    return notification
-end
+-- Tab Class
+local Tab = UIElement:new({Type = "Tab"})
+function UILibrary:Tab(props)
+    local tab = Tab:new(props)
+    tab.Parent = self
+    tab.Position = {self.Position[1] + 5, self.Position[2] + 25 + self.TabOffset + 5} -- Position below title bar
+    tab.Size = {100, 20}
+    tab.Color = {50, 50, 50}
+    tab.Opacity = 1
+    tab.ZIndex = self.ZIndex + 3
 
-function NotificationSystem:update()
-    local currentTime = tick()
-    
-    for i = #self.notifications, 1, -1 do
-        local notif = self.notifications[i]
-        
-        if currentTime - notif.startTime > notif.duration then
-            -- Animate out
-            animationManager:add(notif, "alpha", 0, 0.3, "ease-in")
-            
-            -- Remove after animation
-            spawn(function()
-                wait(0.3)
-                for _, element in pairs(notif.elements) do
-                    if element and element.Remove then
-                        element:Remove()
+    self.TabOffset = self.TabOffset + tab.Size[2] + 5 -- Increment offset for next tab
+
+    -- Draw tab button
+    tab.DrawingObjects.button = Drawing.new("Square")
+    tab.DrawingObjects.button.Position = tab.Position
+    tab.DrawingObjects.button.Size = tab.Size
+    tab.DrawingObjects.button.Color = tab.Color
+    tab.DrawingObjects.button.Opacity = tab.Opacity
+    tab.DrawingObjects.button.Filled = true
+    tab.DrawingObjects.button.ZIndex = tab.ZIndex
+
+    tab.DrawingObjects.text = Drawing.new("Text")
+    tab.DrawingObjects.text.Text = tab.Name
+    tab.DrawingObjects.text.Position = {tab.Position[1] + 5, tab.Position[2] + 3}
+    tab.DrawingObjects.text.Color = {200, 200, 200}
+    tab.DrawingObjects.text.Size = 14
+    tab.DrawingObjects.text.ZIndex = tab.ZIndex + 1
+
+    table.insert(self.Children, tab)
+
+    -- Tab click logic
+    spawn(function()
+        while true do
+            local mouse_x, mouse_y = getmouseposition()
+            local btn_x, btn_y = tab.DrawingObjects.button.Position[1], tab.DrawingObjects.button.Position[2]
+            local btn_w, btn_h = tab.DrawingObjects.button.Size[1], tab.DrawingObjects.button.Size[2]
+
+            if is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
+                tab.DrawingObjects.button.Color = {70, 70, 70} -- Hover color
+                if isleftclicked() then
+                    if self.CurrentTab then
+                        self.CurrentTab:SetVisible(false)
+                        self.CurrentTab.DrawingObjects.button.Color = {50, 50, 50} -- Reset previous tab color
                     end
+                    self.CurrentTab = tab
+                    self.CurrentTab:SetVisible(true)
+                    self.CurrentTab.DrawingObjects.button.Color = {90, 90, 90} -- Active color
+                    self.SectionOffset = 0 -- Reset section offset for new tab
                 end
-            end)
-            
-            table.remove(self.notifications, i)
-            self.yOffset = self.yOffset - 70
-        else
-            -- Update opacity
-            for _, element in pairs(notif.elements) do
-                if element then
-                    element.Opacity = notif.alpha
+            else
+                if self.CurrentTab ~= tab then
+                    tab.DrawingObjects.button.Color = {50, 50, 50} -- Default color
                 end
             end
+            wait()
         end
-    end
+    end)
+
+    tab:SetVisible(false) -- Tabs are initially hidden
+
+    return tab
 end
 
--- Global notification system
-local notifications = NotificationSystem.new()
+-- Section Class
+local Section = UIElement:new({Type = "Section"})
+function Tab:Section(props)
+    local section = Section:new(props)
+    section.Parent = self
+    section.Side = props.Side or "Left"
+    section.Position = {self.Parent.Position[1] + (section.Side == "Left" and 110 or 350), self.Parent.Position[2] + 30 + self.Parent.SectionOffset}
+    section.Size = {240, 150} -- Default section size
+    section.Color = {40, 40, 40}
+    section.Opacity = 0.95
+    section.ZIndex = self.ZIndex + 2
 
--- Input Manager
-local InputManager = {}
-InputManager.__index = InputManager
+    self.Parent.SectionOffset = self.Parent.SectionOffset + section.Size[2] + 10 -- Increment offset for next section
 
-function InputManager.new()
-    return setmetatable({
-        callbacks = {},
-        mousePosition = {x = 0, y = 0},
-        keybindListeners = {},
-        dragData = nil
-    }, InputManager)
+    -- Draw section background
+    section.DrawingObjects.background = Drawing.new("Square")
+    section.DrawingObjects.background.Position = section.Position
+    section.DrawingObjects.background.Size = section.Size
+    section.DrawingObjects.background.Color = section.Color
+    section.DrawingObjects.background.Opacity = section.Opacity
+    section.DrawingObjects.background.Filled = true
+    section.DrawingObjects.background.ZIndex = section.ZIndex
+
+    -- Draw section title
+    section.DrawingObjects.title_text = Drawing.new("Text")
+    section.DrawingObjects.title_text.Text = section.Name
+    section.DrawingObjects.title_text.Position = {section.Position[1] + 5, section.Position[2] + 3}
+    section.DrawingObjects.title_text.Color = {255, 255, 255}
+    section.DrawingObjects.title_text.Size = 14
+    section.DrawingObjects.title_text.ZIndex = section.ZIndex + 1
+
+    section.ContentOffset = 25 -- Offset for content within the section
+
+    table.insert(self.Children, section)
+    section:SetVisible(self.Visible) -- Inherit visibility from parent tab
+
+    return section
 end
 
-function InputManager:addCallback(event, callback)
-    if not self.callbacks[event] then
-        self.callbacks[event] = {}
-    end
-    table.insert(self.callbacks[event], callback)
-end
+-- Button Class
+local Button = UIElement:new({Type = "Button"})
+function Section:Button(props)
+    local button = Button:new(props)
+    button.Parent = self
+    button.Position = {self.Position[1] + 5, self.Position[2] + self.ContentOffset}
+    button.Size = {self.Size[1] - 10, 25}
+    button.Color = {60, 60, 60}
+    button.Opacity = 1
+    button.ZIndex = self.ZIndex + 1
+    button.Callback = props.Callback or function() warn("Button '" .. button.Name .. "' clicked!") end
+    button.Tooltip = props.Tooltip or ""
 
-function InputManager:trigger(event, ...)
-    if self.callbacks[event] then
-        for _, callback in pairs(self.callbacks[event]) do
-            callback(...)
-        end
-    end
-end
+    self.ContentOffset = self.ContentOffset + button.Size[2] + 5
 
-function InputManager:addKeybindListener(keybind, callback)
-    self.keybindListeners[keybind] = callback
-end
+    -- Draw button background
+    button.DrawingObjects.background = Drawing.new("Square")
+    button.DrawingObjects.background.Position = button.Position
+    button.DrawingObjects.background.Size = button.Size
+    button.DrawingObjects.background.Color = button.Color
+    button.DrawingObjects.background.Opacity = button.Opacity
+    button.DrawingObjects.background.Filled = true
+    button.DrawingObjects.background.ZIndex = button.ZIndex
 
-function InputManager:removeKeybindListener(keybind)
-    self.keybindListeners[keybind] = nil
-end
+    -- Draw button text
+    button.DrawingObjects.text = Drawing.new("Text")
+    button.DrawingObjects.text.Text = button.Name
+    button.DrawingObjects.text.Position = {button.Position[1] + 5, button.Position[2] + 5}
+    button.DrawingObjects.text.Color = {255, 255, 255}
+    button.DrawingObjects.text.Size = 14
+    button.DrawingObjects.text.ZIndex = button.ZIndex + 1
 
-function InputManager:update()
-    -- Update mouse position
-    self.mousePosition.x, self.mousePosition.y = getmouseposition()
-    
-    -- Check for keybind presses
-    local pressedKeys = getpressedkeys()
-    for keybind, callback in pairs(self.keybindListeners) do
-        local keys = string.split(keybind, "+")
-        local allPressed = true
-        
-        for _, key in pairs(keys) do
-            local found = false
-            for _, pressedKey in pairs(pressedKeys) do
-                if pressedKey:lower() == key:lower() then
-                    found = true
-                    break
+    table.insert(self.Children, button)
+    button:SetVisible(self.Visible)
+
+    -- Button click logic
+    spawn(function()
+        while true do
+            local mouse_x, mouse_y = getmouseposition()
+            local btn_x, btn_y = button.DrawingObjects.background.Position[1], button.DrawingObjects.background.Position[2]
+            local btn_w, btn_h = button.DrawingObjects.background.Size[1], button.DrawingObjects.background.Size[2]
+
+            if button.Visible and is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
+                button.DrawingObjects.background.Color = {80, 80, 80} -- Hover color
+                if isleftclicked() then
+                    button.Callback()
                 end
+            else
+                button.DrawingObjects.background.Color = {60, 60, 60} -- Default color
             end
-            if not found then
-                allPressed = false
-                break
-            end
+            wait()
         end
-        
-        if allPressed and #keys > 0 then
-            callback()
-        end
-    end
-    
-    -- Handle mouse events
-    if isleftclicked() then
-        self:trigger("mouseClick", self.mousePosition.x, self.mousePosition.y, 1)
-    end
-    
-    if isrightclicked() then
-        self:trigger("mouseClick", self.mousePosition.x, self.mousePosition.y, 2)
-    end
-    
-    -- Handle dragging
-    if self.dragData then
-        if isleftpressed() then
-            local newX = self.mousePosition.x - self.dragData.offsetX
-            local newY = self.mousePosition.y - self.dragData.offsetY
-            
-            if self.dragData.callback then
-                self.dragData.callback(newX, newY)
-            end
-        else
-            self.dragData = nil
-        end
-    end
-end
+    end)
 
-function InputManager:startDrag(offsetX, offsetY, callback)
-    self.dragData = {
-        offsetX = offsetX,
-        offsetY = offsetY,
-        callback = callback
-    }
-end
-
--- Global input manager
-local inputManager = InputManager.new()
-
--- UI Elements
-local Element = {}
-Element.__index = Element
-
-function Element.new(type, parent)
-    local element = setmetatable({
-        type = type,
-        parent = parent,
-        children = {},
-        visible = true,
-        position = {x = 0, y = 0},
-        size = {w = 100, h = 20},
-        drawObjects = {},
-        properties = {}
-    }, Element)
-    
-    if parent then
-        table.insert(parent.children, element)
-    end
-    
-    return element
-end
-
-function Element:destroy()
-    for _, obj in pairs(self.drawObjects) do
-        if obj and obj.Remove then
-            obj:Remove()
-        end
-    end
-    
-    for _, child in pairs(self.children) do
-        child:destroy()
-    end
-    
-    if self.parent then
-        for i, child in pairs(self.parent.children) do
-            if child == self then
-                table.remove(self.parent.children, i)
-                break
-            end
-        end
-    end
-end
-
-function Element:setVisible(visible)
-    self.visible = visible
-    for _, obj in pairs(self.drawObjects) do
-        if obj then
-            obj.Visible = visible
-        end
-    end
-end
-
--- Button Element
-local Button = setmetatable({}, {__index = Element})
-Button.__index = Button
-
-function Button.new(parent, config)
-    local button = setmetatable(Element.new("Button", parent), Button)
-    
-    button.name = config.Name or "Button"
-    button.tooltip = config.Tooltip
-    button.callback = config.Callback or function() end
-    
-    button:createVisuals()
-    button:setupEvents()
-    
     return button
 end
 
-function Button:createVisuals()
-    local bg = Drawing.new("Square")
-    bg.Size = {self.size.w, self.size.h}
-    bg.Position = {self.position.x, self.position.y}
-    bg.Color = COLORS.Secondary
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 10
-    
-    local border = Drawing.new("Square")
-    border.Size = {self.size.w, self.size.h}
-    border.Position = {self.position.x, self.position.y}
-    border.Color = COLORS.Border
-    border.Thickness = 1
-    border.Filled = false
-    border.Visible = true
-    border.ZIndex = 11
-    
-    local text = Drawing.new("Text")
-    text.Text = self.name
-    text.Font = FONTS.Regular
-    text.Size = 12
-    text.Position = {self.position.x + 10, self.position.y + 5}
-    text.Color = COLORS.Text
-    text.Visible = true
-    text.ZIndex = 12
-    
-    self.drawObjects = {bg, border, text}
-end
+-- Toggle Class
+local Toggle = UIElement:new({Type = "Toggle"})
+function Section:Toggle(props)
+    local toggle = Toggle:new(props)
+    toggle.Parent = self
+    toggle.State = props.Default or false
+    toggle.Position = {self.Position[1] + 5, self.Position[2] + self.ContentOffset}
+    toggle.Size = {self.Size[1] - 10, 25}
+    toggle.Color = {60, 60, 60}
+    toggle.Opacity = 1
+    toggle.ZIndex = self.ZIndex + 1
+    toggle.Callback = props.Callback or function(state) warn("Toggle '" .. toggle.Name .. "' state: " .. tostring(state)) end
+    toggle.Tooltip = props.Tooltip or ""
 
-function Button:setupEvents()
-    inputManager:addCallback("mouseClick", function(x, y, button)
-        if button == 1 and pointInRect(x, y, self.position.x, self.position.y, self.size.w, self.size.h) then
-            self:onClick()
+    self.ContentOffset = self.ContentOffset + toggle.Size[2] + 5
+
+    -- Draw toggle background
+    toggle.DrawingObjects.background = Drawing.new("Square")
+    toggle.DrawingObjects.background.Position = toggle.Position
+    toggle.DrawingObjects.background.Size = toggle.Size
+    toggle.DrawingObjects.background.Color = toggle.Color
+    toggle.DrawingObjects.background.Opacity = toggle.Opacity
+    toggle.DrawingObjects.background.Filled = true
+    toggle.DrawingObjects.background.ZIndex = toggle.ZIndex
+
+    -- Draw toggle text
+    toggle.DrawingObjects.text = Drawing.new("Text")
+    toggle.DrawingObjects.text.Text = toggle.Name
+    toggle.DrawingObjects.text.Position = {toggle.Position[1] + 5, toggle.Position[2] + 5}
+    toggle.DrawingObjects.text.Color = {255, 255, 255}
+    toggle.DrawingObjects.text.Size = 14
+    toggle.DrawingObjects.text.ZIndex = toggle.ZIndex + 1
+
+    -- Draw toggle indicator (square on the right)
+    toggle.DrawingObjects.indicator = Drawing.new("Square")
+    toggle.DrawingObjects.indicator.Position = {toggle.Position[1] + toggle.Size[1] - 20, toggle.Position[2] + 5}
+    toggle.DrawingObjects.indicator.Size = {15, 15}
+    toggle.DrawingObjects.indicator.Color = toggle.State and {0, 200, 0} or {100, 100, 100}
+    toggle.DrawingObjects.indicator.Opacity = 1
+    toggle.DrawingObjects.indicator.Filled = true
+    toggle.DrawingObjects.indicator.ZIndex = toggle.ZIndex + 1
+
+    table.insert(self.Children, toggle)
+    toggle:SetVisible(self.Visible)
+
+    -- Toggle click logic
+    spawn(function()
+        while true do
+            local mouse_x, mouse_y = getmouseposition()
+            local btn_x, btn_y = toggle.DrawingObjects.background.Position[1], toggle.DrawingObjects.background.Position[2]
+            local btn_w, btn_h = toggle.DrawingObjects.background.Size[1], toggle.DrawingObjects.background.Size[2]
+
+            if toggle.Visible and is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
+                toggle.DrawingObjects.background.Color = {80, 80, 80} -- Hover color
+                if isleftclicked() then
+                    toggle.State = not toggle.State
+                    toggle.DrawingObjects.indicator.Color = toggle.State and {0, 200, 0} or {100, 100, 100}
+                    toggle.Callback(toggle.State)
+                    wait(0.1) -- Debounce click
+                end
+            else
+                toggle.DrawingObjects.background.Color = {60, 60, 60} -- Default color
+            end
+            wait()
         end
     end)
-end
 
-function Button:onClick()
-    -- Visual feedback
-    local bg = self.drawObjects[1]
-    if bg then
-        bg.Color = COLORS.Accent
-        spawn(function()
-            wait(0.1)
-            bg.Color = COLORS.Secondary
-        end)
-    end
-    
-    self.callback()
-end
-
--- Toggle Element
-local Toggle = setmetatable({}, {__index = Element})
-Toggle.__index = Toggle
-
-function Toggle.new(parent, config)
-    local toggle = setmetatable(Element.new("Toggle", parent), Toggle)
-    
-    toggle.name = config.Name or "Toggle"
-    toggle.tooltip = config.Tooltip
-    toggle.default = config.Default or false
-    toggle.callback = config.Callback or function() end
-    toggle.state = toggle.default
-    toggle.keybind = nil
-    
-    toggle:createVisuals()
-    toggle:setupEvents()
-    
     return toggle
 end
 
-function Toggle:createVisuals()
-    local bg = Drawing.new("Square")
-    bg.Size = {self.size.w, self.size.h}
-    bg.Position = {self.position.x, self.position.y}
-    bg.Color = COLORS.Secondary
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 10
-    
-    local border = Drawing.new("Square")
-    border.Size = {self.size.w, self.size.h}
-    border.Position = {self.position.x, self.position.y}
-    border.Color = COLORS.Border
-    border.Thickness = 1
-    border.Filled = false
-    border.Visible = true
-    bg.ZIndex = 11
-    
-    local checkbox = Drawing.new("Square")
-    checkbox.Size = {12, 12}
-    checkbox.Position = {self.position.x + self.size.w - 20, self.position.y + 4}
-    checkbox.Color = self.state and COLORS.Accent or COLORS.Border
-    checkbox.Filled = self.state
-    checkbox.Visible = true
-    checkbox.ZIndex = 12
-    
-    local text = Drawing.new("Text")
-    text.Text = self.name
-    text.Font = FONTS.Regular
-    text.Size = 12
-    text.Position = {self.position.x + 10, self.position.y + 5}
-    text.Color = COLORS.Text
-    text.Visible = true
-    text.ZIndex = 12
-    
-    self.drawObjects = {bg, border, checkbox, text}
-end
+-- Keybind Class (attached to Toggle)
+local Keybind = UIElement:new({Type = "Keybind"})
+function Toggle:Keybind(props)
+    local keybind = Keybind:new(props)
+    keybind.Parent = self
+    keybind.DefaultKey = props.Default or "None"
+    keybind.CurrentKey = keybind.DefaultKey
+    keybind.Callback = props.Callback or function(key) warn("Keybind for '" .. keybind.Parent.Name .. "' set to: " .. key) end
+    keybind.Listening = false
 
-function Toggle:setupEvents()
-    inputManager:addCallback("mouseClick", function(x, y, button)
-        if button == 1 and pointInRect(x, y, self.position.x, self.position.y, self.size.w, self.size.h) then
-            self:toggle()
+    keybind.Position = {self.Position[1] + 5, self.Position[2] + self.Size[2] + 5} -- Below the parent toggle
+    keybind.Size = {self.Size[1] - 10, 20}
+    keybind.Color = {50, 50, 50}
+    keybind.Opacity = 1
+    keybind.ZIndex = self.ZIndex + 1
+
+    -- Draw keybind background
+    keybind.DrawingObjects.background = Drawing.new("Square")
+    keybind.DrawingObjects.background.Position = keybind.Position
+    keybind.DrawingObjects.background.Size = keybind.Size
+    keybind.DrawingObjects.background.Color = keybind.Color
+    keybind.DrawingObjects.background.Opacity = keybind.Opacity
+    keybind.DrawingObjects.background.Filled = true
+    keybind.DrawingObjects.background.ZIndex = keybind.ZIndex
+
+    -- Draw keybind text
+    keybind.DrawingObjects.text = Drawing.new("Text")
+    keybind.DrawingObjects.text.Text = "Keybind: " .. keybind.CurrentKey
+    keybind.DrawingObjects.text.Position = {keybind.Position[1] + 5, keybind.Position[2] + 3}
+    keybind.DrawingObjects.text.Color = {255, 255, 255}
+    keybind.DrawingObjects.text.Size = 12
+    keybind.DrawingObjects.text.ZIndex = keybind.ZIndex + 1
+
+    table.insert(self.Children, keybind)
+    keybind:SetVisible(self.Visible)
+
+    -- Keybind logic
+    spawn(function()
+        while true do
+            local mouse_x, mouse_y = getmouseposition()
+            local btn_x, btn_y = keybind.DrawingObjects.background.Position[1], keybind.DrawingObjects.background.Position[2]
+            local btn_w, btn_h = keybind.DrawingObjects.background.Size[1], keybind.DrawingObjects.background.Size[2]
+
+            if keybind.Visible and is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
+                keybind.DrawingObjects.background.Color = {70, 70, 70} -- Hover color
+                if isleftclicked() then
+                    keybind.Listening = true
+                    keybind.DrawingObjects.text.Text = "Press a key..."
+                    keybind.DrawingObjects.background.Color = {100, 100, 0} -- Listening color
+                    wait(0.1) -- Debounce click
+                end
+            else
+                if not keybind.Listening then
+                    keybind.DrawingObjects.background.Color = {50, 50, 50} -- Default color
+                end
+            end
+
+            if keybind.Listening then
+                local pressed_key = getpressedkey()
+                if pressed_key and pressed_key ~= "" then
+                    keybind.CurrentKey = pressed_key
+                    keybind.Listening = false
+                    keybind.DrawingObjects.text.Text = "Keybind: " .. keybind.CurrentKey
+                    keybind.Callback(keybind.CurrentKey)
+                    wait(0.1) -- Debounce key press
+                end
+            end
+            wait()
         end
     end)
-end
 
-function Toggle:toggle()
-    self.state = not self.state
-    
-    local checkbox = self.drawObjects[3]
-    if checkbox then
-        checkbox.Color = self.state and COLORS.Accent or COLORS.Border
-        checkbox.Filled = self.state
-    end
-    
-    self.callback(self.state)
-end
-
-function Toggle:Keybind(config)
-    local keybind = {
-        default = config.Default or "None",
-        callback = config.Callback or function() end,
-        current = config.Default or "None",
-        listening = false
-    }
-    
-    self.keybind = keybind
-    
-    if keybind.current ~= "None" then
-        inputManager:addKeybindListener(keybind.current, function()
-            self:toggle()
-            keybind.callback(self.state)
-        end)
-    end
-    
     return keybind
 end
 
--- Dropdown Element
-local Dropdown = setmetatable({}, {__index = Element})
-Dropdown.__index = Dropdown
+-- Dropdown Class
+local Dropdown = UIElement:new({Type = "Dropdown"})
+function Section:Dropdown(props)
+    local dropdown = Dropdown:new(props)
+    dropdown.Parent = self
+    dropdown.Selected = props.Default or "None"
+    dropdown.Options = props.Options or {}
+    dropdown.Callback = props.Callback or function(selected) warn("Dropdown '" .. dropdown.Name .. "' selected: " .. selected) end
+    dropdown.Expanded = false
 
-function Dropdown.new(parent, config)
-    local dropdown = setmetatable(Element.new("Dropdown", parent), Dropdown)
-    
-    dropdown.name = config.Name or "Dropdown"
-    dropdown.tooltip = config.Tooltip
-    dropdown.default = config.Default or "None"
-    dropdown.options = config.Options or {}
-    dropdown.callback = config.Callback or function() end
-    dropdown.selected = dropdown.default
-    dropdown.opened = false
-    
-    dropdown:createVisuals()
-    dropdown:setupEvents()
-    
-    return dropdown
-end
+    dropdown.Position = {self.Position[1] + 5, self.Position[2] + self.ContentOffset}
+    dropdown.Size = {self.Size[1] - 10, 25}
+    dropdown.Color = {60, 60, 60}
+    dropdown.Opacity = 1
+    dropdown.ZIndex = self.ZIndex + 1
 
-function Dropdown:createVisuals()
-    local bg = Drawing.new("Square")
-    bg.Size = {self.size.w, self.size.h}
-    bg.Position = {self.position.x, self.position.y}
-    bg.Color = COLORS.Secondary
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 10
-    
-    local border = Drawing.new("Square")
-    border.Size = {self.size.w, self.size.h}
-    border.Position = {self.position.x, self.position.y}
-    border.Color = COLORS.Border
-    border.Thickness = 1
-    border.Filled = false
-    border.Visible = true
-    border.ZIndex = 11
-    
-    local label = Drawing.new("Text")
-    label.Text = self.name
-    label.Font = FONTS.Regular
-    label.Size = 12
-    label.Position = {self.position.x + 10, self.position.y + 5}
-    label.Color = COLORS.Text
-    label.Visible = true
-    label.ZIndex = 12
-    
-    local value = Drawing.new("Text")
-    value.Text = self.selected
-    value.Font = FONTS.Regular
-    value.Size = 12
-    value.Position = {self.position.x + self.size.w - 100, self.position.y + 5}
-    value.Color = COLORS.TextDark
-    value.Visible = true
-    value.ZIndex = 12
-    
-    local arrow = Drawing.new("Text")
-    arrow.Text = "v"
-    arrow.Font = FONTS.Regular
-    arrow.Size = 12
-    arrow.Position = {self.position.x + self.size.w - 20, self.position.y + 5}
-    arrow.Color = COLORS.TextDark
-    arrow.Visible = true
-    arrow.ZIndex = 12
-    
-    self.drawObjects = {bg, border, label, value, arrow}
-end
+    self.ContentOffset = self.ContentOffset + dropdown.Size[2] + 5
 
-function Dropdown:setupEvents()
-    inputManager:addCallback("mouseClick", function(x, y, button)
-        if button == 1 and pointInRect(x, y, self.position.x, self.position.y, self.size.w, self.size.h) then
-            self:toggleDropdown()
-        end
-    end)
-end
+    -- Draw dropdown main button
+    dropdown.DrawingObjects.button = Drawing.new("Square")
+    dropdown.DrawingObjects.button.Position = dropdown.Position
+    dropdown.DrawingObjects.button.Size = dropdown.Size
+    dropdown.DrawingObjects.button.Color = dropdown.Color
+    dropdown.DrawingObjects.button.Opacity = dropdown.Opacity
+    dropdown.DrawingObjects.button.Filled = true
+    dropdown.DrawingObjects.button.ZIndex = dropdown.ZIndex
 
-function Dropdown:toggleDropdown()
-    self.opened = not self.opened
-    -- Implementation for dropdown menu would go here
-    -- For brevity, this is simplified
-end
+    -- Draw dropdown text
+    dropdown.DrawingObjects.text = Drawing.new("Text")
+    dropdown.DrawingObjects.text.Text = dropdown.Name .. ": " .. dropdown.Selected
+    dropdown.DrawingObjects.text.Position = {dropdown.Position[1] + 5, dropdown.Position[2] + 5}
+    dropdown.DrawingObjects.text.Color = {255, 255, 255}
+    dropdown.DrawingObjects.text.Size = 14
+    dropdown.DrawingObjects.text.ZIndex = dropdown.ZIndex + 1
 
--- Multi Dropdown Element
-local MultiDropdown = setmetatable({}, {__index = Element})
-MultiDropdown.__index = MultiDropdown
+    dropdown.OptionElements = {}
+    for i, option_text in ipairs(dropdown.Options) do
+        local option_pos_y = dropdown.Position[2] + dropdown.Size[2] + (i - 1) * 20
+        local option_element = {
+            text = option_text,
+            position = {dropdown.Position[1], option_pos_y},
+            size = {dropdown.Size[1], 20},
+            drawing_bg = Drawing.new("Square"),
+            drawing_text = Drawing.new("Text")
+        }
+        option_element.drawing_bg.Position = option_element.position
+        option_element.drawing_bg.Size = option_element.size
+        option_element.drawing_bg.Color = {70, 70, 70}
+        option_element.drawing_bg.Opacity = 1
+        option_element.drawing_bg.Filled = true
+        option_element.drawing_bg.ZIndex = dropdown.ZIndex + 2
+        option_element.drawing_bg.Visible = false
 
-function MultiDropdown.new(parent, config)
-    local dropdown = setmetatable(Element.new("MultiDropdown", parent), MultiDropdown)
-    
-    dropdown.name = config.Name or "Multi Dropdown"
-    dropdown.tooltip = config.Tooltip
-    dropdown.default = config.Default or {"None"}
-    dropdown.options = config.Options or {}
-    dropdown.callback = config.Callback or function() end
-    dropdown.selected = dropdown.default
-    dropdown.opened = false
-    
-    dropdown:createVisuals()
-    dropdown:setupEvents()
-    
-    return dropdown
-end
+        option_element.drawing_text.Text = option_text
+        option_element.drawing_text.Position = {option_element.position[1] + 5, option_element.position[2] + 3}
+        option_element.drawing_text.Color = {255, 255, 255}
+        option_element.drawing_text.Size = 12
+        option_element.drawing_text.ZIndex = dropdown.ZIndex + 3
+        option_element.drawing_text.Visible = false
 
-function MultiDropdown:createVisuals()
-    -- Similar to Dropdown but with multi-select capability
-    local bg = Drawing.new("Square")
-    bg.Size = {self.size.w, self.size.h}
-    bg.Position = {self.position.x, self.position.y}
-    bg.Color = COLORS.Secondary
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 10
-    
-    self.drawObjects = {bg}
-end
-
-function MultiDropdown:setupEvents()
-    -- Multi-select logic would go here
-end
-
--- Slider Element
-local Slider = setmetatable({}, {__index = Element})
-Slider.__index = Slider
-
-function Slider.new(parent, config)
-    local slider = setmetatable(Element.new("Slider", parent), Slider)
-    
-    slider.name = config.Name or "Slider"
-    slider.tooltip = config.Tooltip
-    slider.min = config.Min or 0
-    slider.max = config.Max or 100
-    slider.default = config.Default or 50
-    slider.units = config.Units or ""
-    slider.increment = config.Increment or 1
-    slider.callback = config.Callback or function() end
-    slider.value = slider.default
-    slider.dragging = false
-    
-    slider:createVisuals()
-    slider:setupEvents()
-    
-    return slider
-end
-
-function Slider:createVisuals()
-    local bg = Drawing.new("Square")
-    bg.Size = {self.size.w, self.size.h}
-    bg.Position = {self.position.x, self.position.y}
-    bg.Color = COLORS.Secondary
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 10
-    
-    local border = Drawing.new("Square")
-    border.Size = {self.size.w, self.size.h}
-    border.Position = {self.position.x, self.position.y}
-    border.Color = COLORS.Border
-    border.Thickness = 1
-    border.Filled = false
-    border.Visible = true
-    border.ZIndex = 11
-    
-    local label = Drawing.new("Text")
-    label.Text = self.name
-    label.Font = FONTS.Regular
-    label.Size = 12
-    label.Position = {self.position.x + 10, self.position.y + 5}
-    label.Color = COLORS.Text
-    label.Visible = true
-    label.ZIndex = 12
-    
-    local valueText = Drawing.new("Text")
-    valueText.Text = tostring(self.value) .. self.units
-    valueText.Font = FONTS.Regular
-    valueText.Size = 12
-    valueText.Position = {self.position.x + self.size.w - 60, self.position.y + 5}
-    valueText.Color = COLORS.TextDark
-    valueText.Visible = true
-    valueText.ZIndex = 12
-    
-    self.drawObjects = {bg, border, label, valueText}
-end
-
-function Slider:setupEvents()
-    inputManager:addCallback("mouseClick", function(x, y, button)
-        if button == 1 and pointInRect(x, y, self.position.x, self.position.y, self.size.w, self.size.h) then
-            self.dragging = true
-            self:updateValue(x)
-        end
-    end)
-end
-
-function Slider:updateValue(mouseX)
-    local relativeX = mouseX - self.position.x
-    local percentage = math.max(0, math.min(1, relativeX / self.size.w))
-    self.value = self.min + (self.max - self.min) * percentage
-    self.value = math.floor(self.value / self.increment + 0.5) * self.increment
-    
-    local valueText = self.drawObjects[4]
-    if valueText then
-        valueText.Text = tostring(self.value) .. self.units
+        table.insert(dropdown.OptionElements, option_element)
+        table.insert(dropdown.DrawingObjects, option_element.drawing_bg)
+        table.insert(dropdown.DrawingObjects, option_element.drawing_text)
     end
-    
-    self.callback(self.value)
-end
 
--- Section Element
-local Section = setmetatable({}, {__index = Element})
-Section.__index = Section
+    table.insert(self.Children, dropdown)
+    dropdown:SetVisible(self.Visible)
 
-function Section.new(parent, config)
-    local section = setmetatable(Element.new("Section", parent), Section)
-    
-    section.name = config.Name or "Section"
-    section.side = config.Side or "Left"
-    section.elements = {}
-    section.yOffset = 30
-    
-    section:createVisuals()
-    
-    return section
-end
+    -- Dropdown logic
+    spawn(function()
+        while true do
+            local mouse_x, mouse_y = getmouseposition()
+            local btn_x, btn_y = dropdown.DrawingObjects.button.Position[1], dropdown.DrawingObjects.button.Position[2]
+            local btn_w, btn_h = dropdown.DrawingObjects.button.Size[1], dropdown.DrawingObjects.button.Size[2]
 
-function Section:createVisuals()
-    local bg = Drawing.new("Square")
-    bg.Size = {280, 400}
-    bg.Position = {self.position.x, self.position.y}
-    bg.Color = COLORS.Background
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 5
-    
-    local border = Drawing.new("Square")
-    border.Size = {280, 400}
-    border.Position = {self.position.x, self.position.y}
-    border.Color = COLORS.Border
-    border.Thickness = 1
-    border.Filled = false
-    border.Visible = true
-    border.ZIndex = 6
-    
-    local title = Drawing.new("Text")
-    title.Text = self.name
-    title.Font = FONTS.Bold
-    title.Size = 14
-    title.Position = {self.position.x + 10, self.position.y + 8}
-    title.Color = COLORS.Text
-    title.Visible = true
-    title.ZIndex = 7
-    
-    self.drawObjects = {bg, border, title}
-end
-
-function Section:Button(config)
-    local button = Button.new(self, config)
-    button.position = {x = self.position.x + 10, y = self.position.y + self.yOffset}
-    button.size = {w = 260, h = 25}
-    button:createVisuals()
-    
-    self.yOffset = self.yOffset + 30
-    table.insert(self.elements, button)
-    return button
-end
-
-function Section:Toggle(config)
-    local toggle = Toggle.new(self, config)
-    toggle.position = {x = self.position.x + 10, y = self.position.y + self.yOffset}
-    toggle.size = {w = 260, h = 25}
-    toggle:createVisuals()
-    
-    self.yOffset = self.yOffset + 30
-    table.insert(self.elements, toggle)
-    return toggle
-end
-
-function Section:Dropdown(config)
-    local dropdown = Dropdown.new(self, config)
-    dropdown.position = {x = self.position.x + 10, y = self.position.y + self.yOffset}
-    dropdown.size = {w = 260, h = 25}
-    dropdown:createVisuals()
-    
-    self.yOffset = self.yOffset + 30
-    table.insert(self.elements, dropdown)
-    return dropdown
-end
-
-function Section:MultiDropdown(config)
-    local dropdown = MultiDropdown.new(self, config)
-    dropdown.position = {x = self.position.x + 10, y = self.position.y + self.yOffset}
-    dropdown.size = {w = 260, h = 25}
-    dropdown:createVisuals()
-    
-    self.yOffset = self.yOffset + 30
-    table.insert(self.elements, dropdown)
-    return dropdown
-end
-
-function Section:Slider(config)
-    local slider = Slider.new(self, config)
-    slider.position = {x = self.position.x + 10, y = self.position.y + self.yOffset}
-    slider.size = {w = 260, h = 25}
-    slider:createVisuals()
-    
-    self.yOffset = self.yOffset + 30
-    table.insert(self.elements, slider)
-    return slider
-end
-
--- Tab Element
-local Tab = setmetatable({}, {__index = Element})
-Tab.__index = Tab
-
-function Tab.new(parent, config)
-    local tab = setmetatable(Element.new("Tab", parent), Tab)
-    
-    tab.name = config.Name or "Tab"
-    tab.sections = {}
-    tab.leftSections = {}
-    tab.rightSections = {}
-    
-    return tab
-end
-
-function Tab:Section(config)
-    local section = Section.new(self, config)
-    
-    if config.Side == "Right" then
-        section.position = {x = 320, y = 80 + #self.rightSections * 420}
-        table.insert(self.rightSections, section)
-    else
-        section.position = {x = 20, y = 80 + #self.leftSections * 420}
-        table.insert(self.leftSections, section)
-    end
-    
-    section:createVisuals()
-    table.insert(self.sections, section)
-    return section
-end
-
--- Main UI Element
-local UI = setmetatable({}, {__index = Element})
-UI.__index = UI
-
-function UI.new(config)
-    local ui = setmetatable(Element.new("UI", nil), UI)
-    
-    ui.name = config.Name or "Severe UI"
-    ui.tabs = {}
-    ui.currentTab = nil
-    ui.visible = true
-    ui.position = {x = 100, y = 100}
-    ui.size = {w = 620, h = 500}
-    ui.dragging = false
-    ui.keybindViewer = {
-        enabled = false,
-        keybinds = {},
-        elements = {}
-    }
-    
-    ui:createVisuals()
-    ui:setupEvents()
-    ui:startUpdateLoop()
-    
-    return ui
-end
-
-function UI:createVisuals()
-    local bg = Drawing.new("Square")
-    bg.Size = {self.size.w, self.size.h}
-    bg.Position = {self.position.x, self.position.y}
-    bg.Color = COLORS.Background
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 1
-    
-    local border = Drawing.new("Square")
-    border.Size = {self.size.w, self.size.h}
-    border.Position = {self.position.x, self.position.y}
-    bg.Color = COLORS.Border
-    border.Thickness = 1
-    border.Filled = false
-    border.Visible = true
-    border.ZIndex = 2
-    
-    local titleBar = Drawing.new("Square")
-    titleBar.Size = {self.size.w, 40}
-    titleBar.Position = {self.position.x, self.position.y}
-    titleBar.Color = COLORS.Secondary
-    titleBar.Filled = true
-    titleBar.Visible = true
-    titleBar.ZIndex = 3
-    
-    local titleBorder = Drawing.new("Square")
-    titleBorder.Size = {self.size.w, 40}
-    titleBorder.Position = {self.position.x, self.position.y}
-    titleBorder.Color = COLORS.Border
-    titleBorder.Thickness = 1
-    titleBorder.Filled = false
-    titleBorder.Visible = true
-    titleBorder.ZIndex = 4
-    
-    local title = Drawing.new("Text")
-    title.Text = self.name
-    title.Font = FONTS.Bold
-    title.Size = 16
-    title.Position = {self.position.x + 15, self.position.y + 12}
-    title.Color = COLORS.Text
-    title.Visible = true
-    title.ZIndex = 5
-    
-    self.drawObjects = {bg, border, titleBar, titleBorder, title}
-end
-
-function UI:setupEvents()
-    inputManager:addCallback("mouseClick", function(x, y, button)
-        if button == 1 and pointInRect(x, y, self.position.x, self.position.y, self.size.w, 40) then
-            -- Start dragging
-            inputManager:startDrag(
-                x - self.position.x,
-                y - self.position.y,
-                function(newX, newY)
-                    self:setPosition(newX, newY)
-                end
-            )
-        end
-    end)
-end
-
-function UI:setPosition(x, y)
-    local deltaX = x - self.position.x
-    local deltaY = y - self.position.y
-    
-    self.position.x = x
-    self.position.y = y
-    
-    -- Update main UI elements
-    for _, obj in pairs(self.drawObjects) do
-        if obj then
-            obj.Position = {obj.Position[1] + deltaX, obj.Position[2] + deltaY}
-        end
-    end
-    
-    -- Update tab buttons
-    for i, tab in pairs(self.tabs) do
-        local tabButton = tab.button
-        if tabButton then
-            tabButton.Position = {tabButton.Position[1] + deltaX, tabButton.Position[2] + deltaY}
-        end
-    end
-    
-    -- Update sections and their elements
-    for _, tab in pairs(self.tabs) do
-        for _, section in pairs(tab.sections) do
-            section.position.x = section.position.x + deltaX
-            section.position.y = section.position.y + deltaY
-            
-            for _, obj in pairs(section.drawObjects) do
-                if obj then
-                    obj.Position = {obj.Position[1] + deltaX, obj.Position[2] + deltaY}
-                end
-            end
-            
-            -- Update section elements
-            for _, element in pairs(section.elements) do
-                element.position.x = element.position.x + deltaX
-                element.position.y = element.position.y + deltaY
-                
-                for _, obj in pairs(element.drawObjects) do
-                    if obj then
-                        obj.Position = {obj.Position[1] + deltaX, obj.Position[2] + deltaY}
+            if dropdown.Visible then
+                if is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
+                    dropdown.DrawingObjects.button.Color = {80, 80, 80} -- Hover color
+                    if isleftclicked() then
+                        dropdown.Expanded = not dropdown.Expanded
+                        for _, opt_elem in ipairs(dropdown.OptionElements) do
+                            opt_elem.drawing_bg.Visible = dropdown.Expanded
+                            opt_elem.drawing_text.Visible = dropdown.Expanded
+                        end
+                        wait(0.1)
+                    end
+                else
+                    dropdown.DrawingObjects.button.Color = {60, 60, 60} -- Default color
+                    if isleftclicked() and dropdown.Expanded then -- Click outside to close
+                        dropdown.Expanded = false
+                        for _, opt_elem in ipairs(dropdown.OptionElements) do
+                            opt_elem.drawing_bg.Visible = false
+                            opt_elem.drawing_text.Visible = false
+                        end
+                        wait(0.1)
                     end
                 end
-            end
-        end
-    end
-end
 
-function UI:Tab(config)
-    local tab = Tab.new(self, config)
-    local tabIndex = #self.tabs + 1
-    
-    -- Create tab button
-    local tabButton = Drawing.new("Square")
-    tabButton.Size = {100, 25}
-    tabButton.Position = {self.position.x + 15 + (tabIndex - 1) * 105, self.position.y + 50}
-    tabButton.Color = tabIndex == 1 and COLORS.Accent or COLORS.Secondary
-    tabButton.Filled = true
-    tabButton.Visible = true
-    tabButton.ZIndex = 8
-    
-    local tabButtonBorder = Drawing.new("Square")
-    tabButtonBorder.Size = {100, 25}
-    tabButtonBorder.Position = {self.position.x + 15 + (tabIndex - 1) * 105, self.position.y + 50}
-    tabButtonBorder.Color = COLORS.Border
-    tabButtonBorder.Thickness = 1
-    tabButtonBorder.Filled = false
-    tabButtonBorder.Visible = true
-    tabButtonBorder.ZIndex = 9
-    
-    local tabText = Drawing.new("Text")
-    tabText.Text = tab.name
-    tabText.Font = FONTS.Regular
-    tabText.Size = 12
-    tabText.Position = {self.position.x + 25 + (tabIndex - 1) * 105, self.position.y + 56}
-    tabText.Color = COLORS.Text
-    tabText.Visible = true
-    tabText.ZIndex = 10
-    
-    tab.button = tabButton
-    tab.buttonBorder = tabButtonBorder
-    tab.buttonText = tabText
-    tab.index = tabIndex
-    
-    -- Setup tab click event
-    inputManager:addCallback("mouseClick", function(x, y, button)
-        if button == 1 and pointInRect(x, y, tabButton.Position[1], tabButton.Position[2], 100, 25) then
-            self:switchTab(tabIndex)
-        end
-    end)
-    
-    table.insert(self.tabs, tab)
-    
-    if tabIndex == 1 then
-        self.currentTab = tab
-    else
-        self:hideTab(tab)
-    end
-    
-    return tab
-end
-
-function UI:switchTab(tabIndex)
-    if self.currentTab then
-        self:hideTab(self.currentTab)
-        self.currentTab.button.Color = COLORS.Secondary
-    end
-    
-    local newTab = self.tabs[tabIndex]
-    if newTab then
-        self.currentTab = newTab
-        self:showTab(newTab)
-        newTab.button.Color = COLORS.Accent
-    end
-end
-
-function UI:hideTab(tab)
-    for _, section in pairs(tab.sections) do
-        section:setVisible(false)
-        for _, element in pairs(section.elements) do
-            element:setVisible(false)
-        end
-    end
-end
-
-function UI:showTab(tab)
-    for _, section in pairs(tab.sections) do
-        section:setVisible(true)
-        for _, element in pairs(section.elements) do
-            element:setVisible(true)
-        end
-    end
-end
-
-function UI:setVisible(visible)
-    self.visible = visible
-    
-    -- Update main UI elements
-    for _, obj in pairs(self.drawObjects) do
-        if obj then
-            obj.Visible = visible
-        end
-    end
-    
-    -- Update tabs
-    for _, tab in pairs(self.tabs) do
-        if tab.button then tab.button.Visible = visible end
-        if tab.buttonBorder then tab.buttonBorder.Visible = visible end
-        if tab.buttonText then tab.buttonText.Visible = visible end
-        
-        if visible and tab == self.currentTab then
-            self:showTab(tab)
-        else
-            self:hideTab(tab)
-        end
-    end
-end
-
-function UI:updateKeybindViewer()
-    if not self.keybindViewer.enabled then
-        -- Hide all keybind viewer elements
-        for _, element in pairs(self.keybindViewer.elements) do
-            if element and element.Remove then
-                element:Remove()
-            end
-        end
-        self.keybindViewer.elements = {}
-        return
-    end
-    
-    -- Clear existing elements
-    for _, element in pairs(self.keybindViewer.elements) do
-        if element and element.Remove then
-            element:Remove()
-        end
-    end
-    self.keybindViewer.elements = {}
-    
-    local screenX, screenY = getscreendimensions()
-    local viewerX = screenX - 220
-    local viewerY = 50
-    local yOffset = 0
-    
-    -- Create background
-    local bg = Drawing.new("Square")
-    bg.Size = {200, 30 + #self.keybindViewer.keybinds * 25}
-    bg.Position = {viewerX, viewerY}
-    bg.Color = COLORS.Background
-    bg.Filled = true
-    bg.Visible = true
-    bg.ZIndex = 500
-    
-    local border = Drawing.new("Square")
-    border.Size = {200, 30 + #self.keybindViewer.keybinds * 25}
-    border.Position = {viewerX, viewerY}
-    border.Color = COLORS.Border
-    border.Thickness = 1
-    border.Filled = false
-    border.Visible = true
-    border.ZIndex = 501
-    
-    local title = Drawing.new("Text")
-    title.Text = "Keybinds"
-    title.Font = FONTS.Bold
-    title.Size = 14
-    title.Position = {viewerX + 10, viewerY + 8}
-    title.Color = COLORS.Text
-    title.Visible = true
-    title.ZIndex = 502
-    
-    table.insert(self.keybindViewer.elements, bg)
-    table.insert(self.keybindViewer.elements, border)
-    table.insert(self.keybindViewer.elements, title)
-    
-    yOffset = 30
-    
-    for _, keybind in pairs(self.keybindViewer.keybinds) do
-        if keybind.key ~= "None" then
-            local nameText = Drawing.new("Text")
-            nameText.Text = keybind.name
-            nameText.Font = FONTS.Regular
-            nameText.Size = 12
-            nameText.Position = {viewerX + 10, viewerY + yOffset}
-            nameText.Color = COLORS.Text
-            nameText.Visible = true
-            nameText.ZIndex = 502
-            
-            local keyText = Drawing.new("Text")
-            keyText.Text = "[" .. keybind.key .. "]"
-            keyText.Font = FONTS.Regular
-            keyText.Size = 12
-            keyText.Position = {viewerX + 140, viewerY + yOffset}
-            keyText.Color = COLORS.Accent
-            keyText.Visible = true
-            keyText.ZIndex = 502
-            
-            table.insert(self.keybindViewer.elements, nameText)
-            table.insert(self.keybindViewer.elements, keyText)
-            
-            yOffset = yOffset + 20
-        end
-    end
-end
-
-function UI:addKeybind(name, key)
-    table.insert(self.keybindViewer.keybinds, {name = name, key = key})
-    self:updateKeybindViewer()
-end
-
-function UI:startUpdateLoop()
-    thread.create("SevereUI_MainLoop", function()
-        while true do
-            inputManager:update()
-            animationManager:update()
-            notifications:update()
-            wait(1/60) -- 60 FPS update loop
-        end
-    end)
-end
-
--- Library Constructor
-function Library:Create(config)
-    return UI.new(config)
-end
-
--- Extended Keybind functionality for Toggle
-function Toggle:Keybind(config)
-    local keybind = {
-        default = config.Default or "None",
-        callback = config.Callback or function() end,
-        current = config.Default or "None",
-        listening = false,
-        toggle = self
-    }
-    
-    self.keybind = keybind
-    
-    -- Create keybind button
-    local keybindButton = Drawing.new("Square")
-    keybindButton.Size = {50, 15}
-    keybindButton.Position = {self.position.x + self.size.w - 70, self.position.y + 5}
-    keybindButton.Color = COLORS.Border
-    keybindButton.Filled = false
-    keybindButton.Visible = true
-    keybindButton.ZIndex = 13
-    
-    local keybindText = Drawing.new("Text")
-    keybindText.Text = keybind.current
-    keybindText.Font = FONTS.Regular
-    keybindText.Size = 10
-    keybindText.Position = {self.position.x + self.size.w - 65, self.position.y + 7}
-    keybindText.Color = COLORS.TextDark
-    keybindText.Visible = true
-    keybindText.ZIndex = 14
-    
-    table.insert(self.drawObjects, keybindButton)
-    table.insert(self.drawObjects, keybindText)
-    
-    -- Setup keybind click event
-    inputManager:addCallback("mouseClick", function(x, y, button)
-        if button == 1 and pointInRect(x, y, keybindButton.Position[1], keybindButton.Position[2], 50, 15) then
-            keybind.listening = true
-            keybindText.Text = "..."
-            keybindButton.Color = COLORS.Accent
-            
-            -- Listen for key press
-            thread.create("KeybindListener_" .. self.name, function()
-                while keybind.listening do
-                    local pressedKey = getpressedkey()
-                    if pressedKey and pressedKey ~= "" then
-                        keybind.listening = false
-                        
-                        if pressedKey == "Escape" then
-                            keybind.current = "None"
-                            if keybind.current ~= "None" then
-                                inputManager:removeKeybindListener(keybind.current)
+                if dropdown.Expanded then
+                    for _, opt_elem in ipairs(dropdown.OptionElements) do
+                        local opt_x, opt_y = opt_elem.drawing_bg.Position[1], opt_elem.drawing_bg.Position[2]
+                        local opt_w, opt_h = opt_elem.drawing_bg.Size[1], opt_elem.drawing_bg.Size[2]
+                        if is_point_in_rect(mouse_x, mouse_y, opt_x, opt_y, opt_w, opt_h) then
+                            opt_elem.drawing_bg.Color = {90, 90, 90} -- Option hover color
+                            if isleftclicked() then
+                                dropdown.Selected = opt_elem.text
+                                dropdown.DrawingObjects.text.Text = dropdown.Name .. ": " .. dropdown.Selected
+                                dropdown.Callback(dropdown.Selected)
+                                dropdown.Expanded = false
+                                for _, oe in ipairs(dropdown.OptionElements) do
+                                    oe.drawing_bg.Visible = false
+                                    oe.drawing_text.Visible = false
+                                end
+                                wait(0.1)
                             end
                         else
-                            if keybind.current ~= "None" then
-                                inputManager:removeKeybindListener(keybind.current)
-                            end
-                            keybind.current = pressedKey
-                            inputManager:addKeybindListener(pressedKey, function()
-                                self:toggle()
-                                keybind.callback(self.state)
-                            end)
+                            opt_elem.drawing_bg.Color = {70, 70, 70} -- Option default color
                         end
-                        
-                        keybindText.Text = keybind.current
-                        keybindButton.Color = COLORS.Border
-                        
-                        -- Update keybind viewer
-                        local ui = self.parent.parent.parent -- Navigate up to UI
-                        if ui and ui.addKeybind then
-                            ui:addKeybind(self.name, keybind.current)
-                        end
-                        
-                        break
                     end
-                    wait(0.1)
                 end
-            end)
+            end
+            wait()
         end
     end)
-    
-    if keybind.current ~= "None" then
-        inputManager:addKeybindListener(keybind.current, function()
-            self:toggle()
-            keybind.callback(self.state)
-        end)
-        
-        -- Add to keybind viewer
-        local ui = self.parent.parent.parent -- Navigate up to UI
-        if ui and ui.addKeybind then
-            ui:addKeybind(self.name, keybind.current)
+
+    return dropdown
+end
+
+-- MultiDropdown Class (Simplified, similar to Dropdown but with multiple selections)
+local MultiDropdown = UIElement:new({Type = "MultiDropdown"})
+function Section:MultiDropdown(props)
+    local multidropdown = MultiDropdown:new(props)
+    multidropdown.Parent = self
+    multidropdown.Selected = props.Default or {}
+    multidropdown.Options = props.Options or {}
+    multidropdown.Callback = props.Callback or function(selected) warn("MultiDropdown '" .. multidropdown.Name .. "' selected: " .. table.concat(selected, ", ")) end
+    multidropdown.Expanded = false
+
+    multidropdown.Position = {self.Position[1] + 5, self.Position[2] + self.ContentOffset}
+    multidropdown.Size = {self.Size[1] - 10, 25}
+    multidropdown.Color = {60, 60, 60}
+    multidropdown.Opacity = 1
+    multidropdown.ZIndex = self.ZIndex + 1
+
+    self.ContentOffset = self.ContentOffset + multidropdown.Size[2] + 5
+
+    -- Draw multidropdown main button
+    multidropdown.DrawingObjects.button = Drawing.new("Square")
+    multidropdown.DrawingObjects.button.Position = multidropdown.Position
+    multidropdown.DrawingObjects.button.Size = multidropdown.Size
+    multidropdown.DrawingObjects.button.Color = multidropdown.Color
+    multidropdown.DrawingObjects.button.Opacity = multidropdown.Opacity
+    multidropdown.DrawingObjects.button.Filled = true
+    multidropdown.DrawingObjects.button.ZIndex = multidropdown.ZIndex
+
+    -- Draw multidropdown text
+    multidropdown.DrawingObjects.text = Drawing.new("Text")
+    multidropdown.DrawingObjects.text.Text = multidropdown.Name .. ": " .. (table.concat(multidropdown.Selected, ", ") or "None")
+    multidropdown.DrawingObjects.text.Position = {multidropdown.Position[1] + 5, multidropdown.Position[2] + 5}
+    multidropdown.DrawingObjects.text.Color = {255, 255, 255}
+    multidropdown.DrawingObjects.text.Size = 14
+    multidropdown.DrawingObjects.text.ZIndex = multidropdown.ZIndex + 1
+
+    multidropdown.OptionElements = {}
+    for i, option_text in ipairs(multidropdown.Options) do
+        local option_pos_y = multidropdown.Position[2] + multidropdown.Size[2] + (i - 1) * 20
+        local option_element = {
+            text = option_text,
+            position = {multidropdown.Position[1], option_pos_y},
+            size = {multidropdown.Size[1], 20},
+            drawing_bg = Drawing.new("Square"),
+            drawing_text = Drawing.new("Text"),
+            is_selected = false
+        }
+        -- Check if default includes this option
+        for _, v in ipairs(multidropdown.Selected) do
+            if v == option_text then
+                option_element.is_selected = true
+                break
+            end
         end
+
+        option_element.drawing_bg.Position = option_element.position
+        option_element.drawing_bg.Size = option_element.size
+        option_element.drawing_bg.Color = option_element.is_selected and {0, 150, 0} or {70, 70, 70}
+        option_element.drawing_bg.Opacity = 1
+        option_element.drawing_bg.Filled = true
+        option_element.drawing_bg.ZIndex = multidropdown.ZIndex + 2
+        option_element.drawing_bg.Visible = false
+
+        option_element.drawing_text.Text = option_text
+        option_element.drawing_text.Position = {option_element.position[1] + 5, option_element.position[2] + 3}
+        option_element.drawing_text.Color = {255, 255, 255}
+        option_element.drawing_text.Size = 12
+        option_element.drawing_text.ZIndex = multidropdown.ZIndex + 3
+        option_element.drawing_text.Visible = false
+
+        table.insert(multidropdown.OptionElements, option_element)
+        table.insert(multidropdown.DrawingObjects, option_element.drawing_bg)
+        table.insert(multidropdown.DrawingObjects, option_element.drawing_text)
     end
-    
-    return keybind
-end
 
--- Notification wrapper
-function Library:Notify(text, type, duration)
-    return notifications:show(text, type, duration)
-end
+    table.insert(self.Children, multidropdown)
+    multidropdown:SetVisible(self.Visible)
 
--- Utility functions for users
-function Library:GetMousePosition()
-    return getmouseposition()
-end
+    -- MultiDropdown logic
+    spawn(function()
+        while true do
+            local mouse_x, mouse_y = getmouseposition()
+            local btn_x, btn_y = multidropdown.DrawingObjects.button.Position[1], multidropdown.DrawingObjects.button.Position[2]
+            local btn_w, btn_h = multidropdown.DrawingObjects.button.Size[1], multidropdown.DrawingObjects.button.Size[2]
 
-function Library:IsKeyPressed(key)
-    local pressedKeys = getpressedkeys()
-    for _, pressedKey in pairs(pressedKeys) do
-        if pressedKey:lower() == key:lower() then
-            return true
+            if multidropdown.Visible then
+                if is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
+                    multidropdown.DrawingObjects.button.Color = {80, 80, 80} -- Hover color
+                    if isleftclicked() then
+                        multidropdown.Expanded = not multidropdown.Expanded
+                        for _, opt_elem in ipairs(multidropdown.OptionElements) do
+                            opt_elem.drawing_bg.Visible = multidropdown.Expanded
+                            opt_elem.drawing_text.Visible = multidropdown.Expanded
+                        end
+                        wait(0.1)
+                    end
+                else
+                    multidropdown.DrawingObjects.button.Color = {60, 60, 60} -- Default color
+                    -- No auto-close on click outside for multi-dropdown, user must click main button again
+                end
+
+                if multidropdown.Expanded then
+                    for _, opt_elem in ipairs(multidropdown.OptionElements) do
+                        local opt_x, opt_y = opt_elem.drawing_bg.Position[1], opt_elem.drawing_bg.Position[2]
+                        local opt_w, opt_h = opt_elem.drawing_bg.Size[1], opt_elem.drawing_bg.Size[2]
+                        if is_point_in_rect(mouse_x, mouse_y, opt_x, opt_y, opt_w, opt_h) then
+                            opt_elem.drawing_bg.Color = {90, 90, 90} -- Option hover color
+                            if isleftclicked() then
+                                opt_elem.is_selected = not opt_elem.is_selected
+                                opt_elem.drawing_bg.Color = opt_elem.is_selected and {0, 150, 0} or {70, 70, 70}
+
+                                -- Update selected list
+                                multidropdown.Selected = {}
+                                for _, oe in ipairs(multidropdown.OptionElements) do
+                                    if oe.is_selected then
+                                        table.insert(multidropdown.Selected, oe.text)
+                                    end
+                                end
+                                multidropdown.DrawingObjects.text.Text = multidropdown.Name .. ": " .. (table.concat(multidropdown.Selected, ", ") or "None")
+                                multidropdown.Callback(multidropdown.Selected)
+                                wait(0.1)
+                            end
+                        else
+                            opt_elem.drawing_bg.Color = opt_elem.is_selected and {0, 150, 0} or {70, 70, 70} -- Option default color
+                        end
+                    end
+                end
+            end
+            wait()
         end
+    end)
+
+    return multidropdown
+end
+
+-- Slider Class
+local Slider = UIElement:new({Type = "Slider"})
+function Section:Slider(props)
+    local slider = Slider:new(props)
+    slider.Parent = self
+    slider.Min = props.Min or 0
+    slider.Max = props.Max or 100
+    slider.Default = props.Default or slider.Min
+    slider.Value = slider.Default
+    slider.Units = props.Units or ""
+    slider.Increment = props.Increment or 1
+    slider.Callback = props.Callback or function(value) warn("Slider '" .. slider.Name .. "' value: " .. value) end
+    slider.Dragging = false
+
+    slider.Position = {self.Position[1] + 5, self.Position[2] + self.ContentOffset}
+    slider.Size = {self.Size[1] - 10, 30} -- Slightly taller for slider bar
+    slider.Color = {60, 60, 60}
+    slider.Opacity = 1
+    slider.ZIndex = self.ZIndex + 1
+
+    self.ContentOffset = self.ContentOffset + slider.Size[2] + 5
+
+    -- Draw slider background
+    slider.DrawingObjects.background = Drawing.new("Square")
+    slider.DrawingObjects.background.Position = slider.Position
+    slider.DrawingObjects.background.Size = slider.Size
+    slider.DrawingObjects.background.Color = slider.Color
+    slider.DrawingObjects.background.Opacity = slider.Opacity
+    slider.DrawingObjects.background.Filled = true
+    slider.DrawingObjects.background.ZIndex = slider.ZIndex
+
+    -- Draw slider text
+    slider.DrawingObjects.text = Drawing.new("Text")
+    slider.DrawingObjects.text.Text = slider.Name .. ": " .. tostring(slider.Value) .. slider.Units
+    slider.DrawingObjects.text.Position = {slider.Position[1] + 5, slider.Position[2] + 3}
+    slider.DrawingObjects.text.Color = {255, 255, 255}
+    slider.DrawingObjects.text.Size = 14
+    slider.DrawingObjects.text.ZIndex = slider.ZIndex + 1
+
+    -- Draw slider bar
+    slider.DrawingObjects.bar = Drawing.new("Square")
+    slider.DrawingObjects.bar.Position = {slider.Position[1] + 5, slider.Position[2] + slider.Size[2] - 10}
+    slider.DrawingObjects.bar.Size = {slider.Size[1] - 10, 5}
+    slider.DrawingObjects.bar.Color = {40, 40, 40}
+    slider.DrawingObjects.bar.Opacity = 1
+    slider.DrawingObjects.bar.Filled = true
+    slider.DrawingObjects.bar.ZIndex = slider.ZIndex + 1
+
+    -- Draw slider thumb
+    slider.DrawingObjects.thumb = Drawing.new("Square")
+    slider.DrawingObjects.thumb.Position = {slider.Position[1] + 5 + (slider.Value - slider.Min) / (slider.Max - slider.Min) * (slider.Size[1] - 10 - 10), slider.Position[2] + slider.Size[2] - 13} -- -10 for thumb width
+    slider.DrawingObjects.thumb.Size = {10, 10}
+    slider.DrawingObjects.thumb.Color = {0, 150, 255}
+    slider.DrawingObjects.thumb.Opacity = 1
+    slider.DrawingObjects.thumb.Filled = true
+    slider.DrawingObjects.thumb.ZIndex = slider.ZIndex + 2
+
+    table.insert(self.Children, slider)
+    slider:SetVisible(self.Visible)
+
+    -- Slider logic
+    spawn(function()
+        while true do
+            local mouse_x, mouse_y = getmouseposition()
+            local bar_x, bar_y = slider.DrawingObjects.bar.Position[1], slider.DrawingObjects.bar.Position[2]
+            local bar_w, bar_h = slider.DrawingObjects.bar.Size[1], slider.DrawingObjects.bar.Size[2]
+
+            if slider.Visible then
+                if is_point_in_rect(mouse_x, mouse_y, bar_x, bar_y, bar_w, bar_h) and isleftpressed() then
+                    slider.Dragging = true
+                elseif not isleftpressed() then
+                    slider.Dragging = false
+                end
+
+                if slider.Dragging then
+                    local relative_x = mouse_x - bar_x
+                    local percentage = math.max(0, math.min(1, relative_x / bar_w))
+                    local new_value = slider.Min + percentage * (slider.Max - slider.Min)
+                    new_value = math.floor(new_value / slider.Increment) * slider.Increment -- Snap to increment
+                    new_value = math.max(slider.Min, math.min(slider.Max, new_value)) -- Clamp to min/max
+
+                    if new_value ~= slider.Value then
+                        slider.Value = new_value
+                        slider.DrawingObjects.text.Text = slider.Name .. ": " .. tostring(slider.Value) .. slider.Units
+                        slider.Callback(slider.Value)
+                        -- Update thumb position
+                        local thumb_x_pos = bar_x + percentage * (bar_w - slider.DrawingObjects.thumb.Size[1])
+                        slider.DrawingObjects.thumb.Position = {thumb_x_pos, slider.DrawingObjects.thumb.Position[2]}
+                    end
+                end
+            end
+            wait()
+        end
+    end)
+
+    return slider
+end
+
+-- Global UI rendering and input loop (main loop)
+spawn(function()
+    while true do
+        -- This loop is primarily for handling global UI state like dragging
+        -- Individual element logic is handled in their own spawns
+        wait()
     end
-    return false
-end
+end)
 
-function Library:DestroyUI()
-    Drawing.clear()
-    thread.clear()
-end
-
--- Return the library
 return Library
