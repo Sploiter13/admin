@@ -4,24 +4,18 @@ local UI_ELEMENTS = {}
 local DRAGGING_UI = nil
 local DRAG_OFFSET_X = 0
 local DRAG_OFFSET_Y = 0
-local UI_ZINDEX_BASE = 1000 -- Base ZIndex for UI elements to appear on top
+local UI_ZINDEX_BASE = 1000
 
--- Helper function to check if a point is inside a rectangle
 local function is_point_in_rect(px, py, rx, ry, rw, rh)
     return px >= rx and px <= rx + rw and py >= ry and py <= ry + rh
 end
 
--- Helper function to get text dimensions (approximation, as TextBounds is readonly)
--- This is a very rough approximation. A real UI would need a more sophisticated text measurement.
 local function get_text_dimensions(text_str, font_size)
-    -- These are arbitrary values for demonstration.
-    -- In a real scenario, you'd need to pre-calculate or have a way to query actual text bounds.
     local char_width = font_size * 0.6
     local char_height = font_size * 1.2
     return #text_str * char_width, char_height
 end
 
--- Base UI Element Class
 local UIElement = {}
 UIElement.__index = UIElement
 
@@ -36,7 +30,7 @@ function UIElement:new(props)
         Opacity = props.Opacity or 1,
         Parent = props.Parent,
         Children = {},
-        DrawingObjects = {}, -- Store Drawing library objects
+        DrawingObjects = {},
         Type = "UIElement"
     }
     setmetatable(o, self)
@@ -58,14 +52,13 @@ function UIElement:SetPosition(x, y)
     local dx = x - self.Position[1]
     local dy = y - self.Position[2]
     self.Position = {x, y}
-    -- Update positions of drawing objects
     for _, obj in pairs(self.DrawingObjects) do
         if obj.Position then
             obj.Position = {obj.Position[1] + dx, obj.Position[2] + dy}
         elseif obj.From and obj.To then
             obj.From = {obj.From[1] + dx, obj.From[2] + dy}
             obj.To = {obj.To[1] + dx, obj.To[2] + dy}
-        elseif obj.PointA then -- For Quad/Triangle
+        elseif obj.PointA then
             obj.PointA = {obj.PointA[1] + dx, obj.PointA[2] + dy}
             obj.PointB = {obj.PointB[1] + dx, obj.PointB[2] + dy}
             obj.PointC = {obj.PointC[1] + dx, obj.PointC[2] + dy}
@@ -74,7 +67,6 @@ function UIElement:SetPosition(x, y)
             end
         end
     end
-    -- Recursively update children
     for _, child in pairs(self.Children) do
         child:SetPosition(child.Position[1] + dx, child.Position[2] + dy)
     end
@@ -87,7 +79,6 @@ function UIElement:Remove()
     for _, child in pairs(self.Children) do
         child:Remove()
     end
-    -- Remove from global UI_ELEMENTS table
     for i, v in ipairs(UI_ELEMENTS) do
         if v == self then
             table.remove(UI_ELEMENTS, i)
@@ -96,7 +87,6 @@ function UIElement:Remove()
     end
 end
 
--- Library Class
 local UILibrary = UIElement:new({
     Name = "Severe UI",
     Position = {100, 100},
@@ -114,7 +104,6 @@ function UILibrary:Create(props)
     lib.Color = {30, 30, 30}
     lib.Opacity = 0.9
 
-    -- Draw the main window background
     lib.DrawingObjects.background = Drawing.new("Square")
     lib.DrawingObjects.background.Position = lib.Position
     lib.DrawingObjects.background.Size = lib.Size
@@ -123,7 +112,6 @@ function UILibrary:Create(props)
     lib.DrawingObjects.background.Filled = true
     lib.DrawingObjects.background.ZIndex = lib.ZIndex
 
-    -- Draw the title bar
     lib.DrawingObjects.title_bar = Drawing.new("Square")
     lib.DrawingObjects.title_bar.Position = lib.Position
     lib.DrawingObjects.title_bar.Size = {lib.Size[1], 25}
@@ -132,7 +120,6 @@ function UILibrary:Create(props)
     lib.DrawingObjects.title_bar.Filled = true
     lib.DrawingObjects.title_bar.ZIndex = lib.ZIndex + 1
 
-    -- Draw the title text
     lib.DrawingObjects.title_text = Drawing.new("Text")
     lib.DrawingObjects.title_text.Text = lib.Name
     lib.DrawingObjects.title_text.Position = {lib.Position[1] + 5, lib.Position[2] + 5}
@@ -144,7 +131,6 @@ function UILibrary:Create(props)
     lib.TabOffset = 0
     lib.SectionOffset = 0
 
-    -- Draggable logic
     spawn(function()
         while true do
             local mouse_x, mouse_y = getmouseposition()
@@ -171,20 +157,18 @@ function UILibrary:Create(props)
     return lib
 end
 
--- Tab Class
 local Tab = UIElement:new({Type = "Tab"})
 function UILibrary:Tab(props)
     local tab = Tab:new(props)
     tab.Parent = self
-    tab.Position = {self.Position[1] + 5, self.Position[2] + 25 + self.TabOffset + 5} -- Position below title bar
+    tab.Position = {self.Position[1] + 5, self.Position[2] + 25 + self.TabOffset + 5}
     tab.Size = {100, 20}
     tab.Color = {50, 50, 50}
     tab.Opacity = 1
     tab.ZIndex = self.ZIndex + 3
 
-    self.TabOffset = self.TabOffset + tab.Size[2] + 5 -- Increment offset for next tab
+    self.TabOffset = self.TabOffset + tab.Size[2] + 5
 
-    -- Draw tab button
     tab.DrawingObjects.button = Drawing.new("Square")
     tab.DrawingObjects.button.Position = tab.Position
     tab.DrawingObjects.button.Size = tab.Size
@@ -202,7 +186,6 @@ function UILibrary:Tab(props)
 
     table.insert(self.Children, tab)
 
-    -- Tab click logic
     spawn(function()
         while true do
             local mouse_x, mouse_y = getmouseposition()
@@ -210,46 +193,44 @@ function UILibrary:Tab(props)
             local btn_w, btn_h = tab.DrawingObjects.button.Size[1], tab.DrawingObjects.button.Size[2]
 
             if is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
-                tab.DrawingObjects.button.Color = {70, 70, 70} -- Hover color
+                tab.DrawingObjects.button.Color = {70, 70, 70}
                 if isleftclicked() then
                     if self.CurrentTab then
                         self.CurrentTab:SetVisible(false)
-                        self.CurrentTab.DrawingObjects.button.Color = {50, 50, 50} -- Reset previous tab color
+                        self.CurrentTab.DrawingObjects.button.Color = {50, 50, 50}
                     end
                     self.CurrentTab = tab
                     self.CurrentTab:SetVisible(true)
-                    self.CurrentTab.DrawingObjects.button.Color = {90, 90, 90} -- Active color
-                    self.SectionOffset = 0 -- Reset section offset for new tab
+                    self.CurrentTab.DrawingObjects.button.Color = {90, 90, 90}
+                    self.SectionOffset = 0
                 end
             else
                 if self.CurrentTab ~= tab then
-                    tab.DrawingObjects.button.Color = {50, 50, 50} -- Default color
+                    tab.DrawingObjects.button.Color = {50, 50, 50}
                 end
             end
             wait()
         end
     end)
 
-    tab:SetVisible(false) -- Tabs are initially hidden
+    tab:SetVisible(false)
 
     return tab
 end
 
--- Section Class
 local Section = UIElement:new({Type = "Section"})
 function Tab:Section(props)
     local section = Section:new(props)
     section.Parent = self
     section.Side = props.Side or "Left"
     section.Position = {self.Parent.Position[1] + (section.Side == "Left" and 110 or 350), self.Parent.Position[2] + 30 + self.Parent.SectionOffset}
-    section.Size = {240, 150} -- Default section size
+    section.Size = {240, 150}
     section.Color = {40, 40, 40}
     section.Opacity = 0.95
     section.ZIndex = self.ZIndex + 2
 
-    self.Parent.SectionOffset = self.Parent.SectionOffset + section.Size[2] + 10 -- Increment offset for next section
+    self.Parent.SectionOffset = self.Parent.SectionOffset + section.Size[2] + 10
 
-    -- Draw section background
     section.DrawingObjects.background = Drawing.new("Square")
     section.DrawingObjects.background.Position = section.Position
     section.DrawingObjects.background.Size = section.Size
@@ -258,7 +239,6 @@ function Tab:Section(props)
     section.DrawingObjects.background.Filled = true
     section.DrawingObjects.background.ZIndex = section.ZIndex
 
-    -- Draw section title
     section.DrawingObjects.title_text = Drawing.new("Text")
     section.DrawingObjects.title_text.Text = section.Name
     section.DrawingObjects.title_text.Position = {section.Position[1] + 5, section.Position[2] + 3}
@@ -266,15 +246,14 @@ function Tab:Section(props)
     section.DrawingObjects.title_text.Size = 14
     section.DrawingObjects.title_text.ZIndex = section.ZIndex + 1
 
-    section.ContentOffset = 25 -- Offset for content within the section
+    section.ContentOffset = 25
 
     table.insert(self.Children, section)
-    section:SetVisible(self.Visible) -- Inherit visibility from parent tab
+    section:SetVisible(self.Visible)
 
     return section
 end
 
--- Button Class
 local Button = UIElement:new({Type = "Button"})
 function Section:Button(props)
     local button = Button:new(props)
@@ -289,7 +268,6 @@ function Section:Button(props)
 
     self.ContentOffset = self.ContentOffset + button.Size[2] + 5
 
-    -- Draw button background
     button.DrawingObjects.background = Drawing.new("Square")
     button.DrawingObjects.background.Position = button.Position
     button.DrawingObjects.background.Size = button.Size
@@ -298,7 +276,6 @@ function Section:Button(props)
     button.DrawingObjects.background.Filled = true
     button.DrawingObjects.background.ZIndex = button.ZIndex
 
-    -- Draw button text
     button.DrawingObjects.text = Drawing.new("Text")
     button.DrawingObjects.text.Text = button.Name
     button.DrawingObjects.text.Position = {button.Position[1] + 5, button.Position[2] + 5}
@@ -309,7 +286,6 @@ function Section:Button(props)
     table.insert(self.Children, button)
     button:SetVisible(self.Visible)
 
-    -- Button click logic
     spawn(function()
         while true do
             local mouse_x, mouse_y = getmouseposition()
@@ -317,12 +293,12 @@ function Section:Button(props)
             local btn_w, btn_h = button.DrawingObjects.background.Size[1], button.DrawingObjects.background.Size[2]
 
             if button.Visible and is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
-                button.DrawingObjects.background.Color = {80, 80, 80} -- Hover color
+                button.DrawingObjects.background.Color = {80, 80, 80}
                 if isleftclicked() then
                     button.Callback()
                 end
             else
-                button.DrawingObjects.background.Color = {60, 60, 60} -- Default color
+                button.DrawingObjects.background.Color = {60, 60, 60}
             end
             wait()
         end
@@ -331,7 +307,6 @@ function Section:Button(props)
     return button
 end
 
--- Toggle Class
 local Toggle = UIElement:new({Type = "Toggle"})
 function Section:Toggle(props)
     local toggle = Toggle:new(props)
@@ -347,7 +322,6 @@ function Section:Toggle(props)
 
     self.ContentOffset = self.ContentOffset + toggle.Size[2] + 5
 
-    -- Draw toggle background
     toggle.DrawingObjects.background = Drawing.new("Square")
     toggle.DrawingObjects.background.Position = toggle.Position
     toggle.DrawingObjects.background.Size = toggle.Size
@@ -356,7 +330,6 @@ function Section:Toggle(props)
     toggle.DrawingObjects.background.Filled = true
     toggle.DrawingObjects.background.ZIndex = toggle.ZIndex
 
-    -- Draw toggle text
     toggle.DrawingObjects.text = Drawing.new("Text")
     toggle.DrawingObjects.text.Text = toggle.Name
     toggle.DrawingObjects.text.Position = {toggle.Position[1] + 5, toggle.Position[2] + 5}
@@ -364,7 +337,6 @@ function Section:Toggle(props)
     toggle.DrawingObjects.text.Size = 14
     toggle.DrawingObjects.text.ZIndex = toggle.ZIndex + 1
 
-    -- Draw toggle indicator (square on the right)
     toggle.DrawingObjects.indicator = Drawing.new("Square")
     toggle.DrawingObjects.indicator.Position = {toggle.Position[1] + toggle.Size[1] - 20, toggle.Position[2] + 5}
     toggle.DrawingObjects.indicator.Size = {15, 15}
@@ -376,7 +348,6 @@ function Section:Toggle(props)
     table.insert(self.Children, toggle)
     toggle:SetVisible(self.Visible)
 
-    -- Toggle click logic
     spawn(function()
         while true do
             local mouse_x, mouse_y = getmouseposition()
@@ -384,15 +355,15 @@ function Section:Toggle(props)
             local btn_w, btn_h = toggle.DrawingObjects.background.Size[1], toggle.DrawingObjects.background.Size[2]
 
             if toggle.Visible and is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
-                toggle.DrawingObjects.background.Color = {80, 80, 80} -- Hover color
+                toggle.DrawingObjects.background.Color = {80, 80, 80}
                 if isleftclicked() then
                     toggle.State = not toggle.State
                     toggle.DrawingObjects.indicator.Color = toggle.State and {0, 200, 0} or {100, 100, 100}
                     toggle.Callback(toggle.State)
-                    wait(0.1) -- Debounce click
+                    wait(0.1)
                 end
             else
-                toggle.DrawingObjects.background.Color = {60, 60, 60} -- Default color
+                toggle.DrawingObjects.background.Color = {60, 60, 60}
             end
             wait()
         end
@@ -401,7 +372,6 @@ function Section:Toggle(props)
     return toggle
 end
 
--- Keybind Class (attached to Toggle)
 local Keybind = UIElement:new({Type = "Keybind"})
 function Toggle:Keybind(props)
     local keybind = Keybind:new(props)
@@ -411,13 +381,12 @@ function Toggle:Keybind(props)
     keybind.Callback = props.Callback or function(key) warn("Keybind for '" .. keybind.Parent.Name .. "' set to: " .. key) end
     keybind.Listening = false
 
-    keybind.Position = {self.Position[1] + 5, self.Position[2] + self.Size[2] + 5} -- Below the parent toggle
+    keybind.Position = {self.Position[1] + 5, self.Position[2] + self.Size[2] + 5}
     keybind.Size = {self.Size[1] - 10, 20}
     keybind.Color = {50, 50, 50}
     keybind.Opacity = 1
     keybind.ZIndex = self.ZIndex + 1
 
-    -- Draw keybind background
     keybind.DrawingObjects.background = Drawing.new("Square")
     keybind.DrawingObjects.background.Position = keybind.Position
     keybind.DrawingObjects.background.Size = keybind.Size
@@ -426,7 +395,6 @@ function Toggle:Keybind(props)
     keybind.DrawingObjects.background.Filled = true
     keybind.DrawingObjects.background.ZIndex = keybind.ZIndex
 
-    -- Draw keybind text
     keybind.DrawingObjects.text = Drawing.new("Text")
     keybind.DrawingObjects.text.Text = "Keybind: " .. keybind.CurrentKey
     keybind.DrawingObjects.text.Position = {keybind.Position[1] + 5, keybind.Position[2] + 3}
@@ -437,7 +405,6 @@ function Toggle:Keybind(props)
     table.insert(self.Children, keybind)
     keybind:SetVisible(self.Visible)
 
-    -- Keybind logic
     spawn(function()
         while true do
             local mouse_x, mouse_y = getmouseposition()
@@ -445,16 +412,16 @@ function Toggle:Keybind(props)
             local btn_w, btn_h = keybind.DrawingObjects.background.Size[1], keybind.DrawingObjects.background.Size[2]
 
             if keybind.Visible and is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
-                keybind.DrawingObjects.background.Color = {70, 70, 70} -- Hover color
+                keybind.DrawingObjects.background.Color = {70, 70, 70}
                 if isleftclicked() then
                     keybind.Listening = true
                     keybind.DrawingObjects.text.Text = "Press a key..."
-                    keybind.DrawingObjects.background.Color = {100, 100, 0} -- Listening color
-                    wait(0.1) -- Debounce click
+                    keybind.DrawingObjects.background.Color = {100, 100, 0}
+                    wait(0.1)
                 end
             else
                 if not keybind.Listening then
-                    keybind.DrawingObjects.background.Color = {50, 50, 50} -- Default color
+                    keybind.DrawingObjects.background.Color = {50, 50, 50}
                 end
             end
 
@@ -465,7 +432,7 @@ function Toggle:Keybind(props)
                     keybind.Listening = false
                     keybind.DrawingObjects.text.Text = "Keybind: " .. keybind.CurrentKey
                     keybind.Callback(keybind.CurrentKey)
-                    wait(0.1) -- Debounce key press
+                    wait(0.1)
                 end
             end
             wait()
@@ -475,7 +442,6 @@ function Toggle:Keybind(props)
     return keybind
 end
 
--- Dropdown Class
 local Dropdown = UIElement:new({Type = "Dropdown"})
 function Section:Dropdown(props)
     local dropdown = Dropdown:new(props)
@@ -493,7 +459,6 @@ function Section:Dropdown(props)
 
     self.ContentOffset = self.ContentOffset + dropdown.Size[2] + 5
 
-    -- Draw dropdown main button
     dropdown.DrawingObjects.button = Drawing.new("Square")
     dropdown.DrawingObjects.button.Position = dropdown.Position
     dropdown.DrawingObjects.button.Size = dropdown.Size
@@ -502,7 +467,6 @@ function Section:Dropdown(props)
     dropdown.DrawingObjects.button.Filled = true
     dropdown.DrawingObjects.button.ZIndex = dropdown.ZIndex
 
-    -- Draw dropdown text
     dropdown.DrawingObjects.text = Drawing.new("Text")
     dropdown.DrawingObjects.text.Text = dropdown.Name .. ": " .. dropdown.Selected
     dropdown.DrawingObjects.text.Position = {dropdown.Position[1] + 5, dropdown.Position[2] + 5}
@@ -543,7 +507,6 @@ function Section:Dropdown(props)
     table.insert(self.Children, dropdown)
     dropdown:SetVisible(self.Visible)
 
-    -- Dropdown logic
     spawn(function()
         while true do
             local mouse_x, mouse_y = getmouseposition()
@@ -552,7 +515,7 @@ function Section:Dropdown(props)
 
             if dropdown.Visible then
                 if is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
-                    dropdown.DrawingObjects.button.Color = {80, 80, 80} -- Hover color
+                    dropdown.DrawingObjects.button.Color = {80, 80, 80}
                     if isleftclicked() then
                         dropdown.Expanded = not dropdown.Expanded
                         for _, opt_elem in ipairs(dropdown.OptionElements) do
@@ -562,8 +525,8 @@ function Section:Dropdown(props)
                         wait(0.1)
                     end
                 else
-                    dropdown.DrawingObjects.button.Color = {60, 60, 60} -- Default color
-                    if isleftclicked() and dropdown.Expanded then -- Click outside to close
+                    dropdown.DrawingObjects.button.Color = {60, 60, 60}
+                    if isleftclicked() and dropdown.Expanded then
                         dropdown.Expanded = false
                         for _, opt_elem in ipairs(dropdown.OptionElements) do
                             opt_elem.drawing_bg.Visible = false
@@ -578,7 +541,7 @@ function Section:Dropdown(props)
                         local opt_x, opt_y = opt_elem.drawing_bg.Position[1], opt_elem.drawing_bg.Position[2]
                         local opt_w, opt_h = opt_elem.drawing_bg.Size[1], opt_elem.drawing_bg.Size[2]
                         if is_point_in_rect(mouse_x, mouse_y, opt_x, opt_y, opt_w, opt_h) then
-                            opt_elem.drawing_bg.Color = {90, 90, 90} -- Option hover color
+                            opt_elem.drawing_bg.Color = {90, 90, 90}
                             if isleftclicked() then
                                 dropdown.Selected = opt_elem.text
                                 dropdown.DrawingObjects.text.Text = dropdown.Name .. ": " .. dropdown.Selected
@@ -591,7 +554,7 @@ function Section:Dropdown(props)
                                 wait(0.1)
                             end
                         else
-                            opt_elem.drawing_bg.Color = {70, 70, 70} -- Option default color
+                            opt_elem.drawing_bg.Color = {70, 70, 70}
                         end
                     end
                 end
@@ -603,7 +566,6 @@ function Section:Dropdown(props)
     return dropdown
 end
 
--- MultiDropdown Class (Simplified, similar to Dropdown but with multiple selections)
 local MultiDropdown = UIElement:new({Type = "MultiDropdown"})
 function Section:MultiDropdown(props)
     local multidropdown = MultiDropdown:new(props)
@@ -621,7 +583,6 @@ function Section:MultiDropdown(props)
 
     self.ContentOffset = self.ContentOffset + multidropdown.Size[2] + 5
 
-    -- Draw multidropdown main button
     multidropdown.DrawingObjects.button = Drawing.new("Square")
     multidropdown.DrawingObjects.button.Position = multidropdown.Position
     multidropdown.DrawingObjects.button.Size = multidropdown.Size
@@ -630,7 +591,6 @@ function Section:MultiDropdown(props)
     multidropdown.DrawingObjects.button.Filled = true
     multidropdown.DrawingObjects.button.ZIndex = multidropdown.ZIndex
 
-    -- Draw multidropdown text
     multidropdown.DrawingObjects.text = Drawing.new("Text")
     multidropdown.DrawingObjects.text.Text = multidropdown.Name .. ": " .. (table.concat(multidropdown.Selected, ", ") or "None")
     multidropdown.DrawingObjects.text.Position = {multidropdown.Position[1] + 5, multidropdown.Position[2] + 5}
@@ -649,7 +609,6 @@ function Section:MultiDropdown(props)
             drawing_text = Drawing.new("Text"),
             is_selected = false
         }
-        -- Check if default includes this option
         for _, v in ipairs(multidropdown.Selected) do
             if v == option_text then
                 option_element.is_selected = true
@@ -680,7 +639,6 @@ function Section:MultiDropdown(props)
     table.insert(self.Children, multidropdown)
     multidropdown:SetVisible(self.Visible)
 
-    -- MultiDropdown logic
     spawn(function()
         while true do
             local mouse_x, mouse_y = getmouseposition()
@@ -689,7 +647,7 @@ function Section:MultiDropdown(props)
 
             if multidropdown.Visible then
                 if is_point_in_rect(mouse_x, mouse_y, btn_x, btn_y, btn_w, btn_h) then
-                    multidropdown.DrawingObjects.button.Color = {80, 80, 80} -- Hover color
+                    multidropdown.DrawingObjects.button.Color = {80, 80, 80}
                     if isleftclicked() then
                         multidropdown.Expanded = not multidropdown.Expanded
                         for _, opt_elem in ipairs(multidropdown.OptionElements) do
@@ -699,8 +657,7 @@ function Section:MultiDropdown(props)
                         wait(0.1)
                     end
                 else
-                    multidropdown.DrawingObjects.button.Color = {60, 60, 60} -- Default color
-                    -- No auto-close on click outside for multi-dropdown, user must click main button again
+                    multidropdown.DrawingObjects.button.Color = {60, 60, 60}
                 end
 
                 if multidropdown.Expanded then
@@ -708,12 +665,11 @@ function Section:MultiDropdown(props)
                         local opt_x, opt_y = opt_elem.drawing_bg.Position[1], opt_elem.drawing_bg.Position[2]
                         local opt_w, opt_h = opt_elem.drawing_bg.Size[1], opt_elem.drawing_bg.Size[2]
                         if is_point_in_rect(mouse_x, mouse_y, opt_x, opt_y, opt_w, opt_h) then
-                            opt_elem.drawing_bg.Color = {90, 90, 90} -- Option hover color
+                            opt_elem.drawing_bg.Color = {90, 90, 90}
                             if isleftclicked() then
                                 opt_elem.is_selected = not opt_elem.is_selected
                                 opt_elem.drawing_bg.Color = opt_elem.is_selected and {0, 150, 0} or {70, 70, 70}
 
-                                -- Update selected list
                                 multidropdown.Selected = {}
                                 for _, oe in ipairs(multidropdown.OptionElements) do
                                     if oe.is_selected then
@@ -725,7 +681,7 @@ function Section:MultiDropdown(props)
                                 wait(0.1)
                             end
                         else
-                            opt_elem.drawing_bg.Color = opt_elem.is_selected and {0, 150, 0} or {70, 70, 70} -- Option default color
+                            opt_elem.drawing_bg.Color = opt_elem.is_selected and {0, 150, 0} or {70, 70, 70}
                         end
                     end
                 end
@@ -737,7 +693,6 @@ function Section:MultiDropdown(props)
     return multidropdown
 end
 
--- Slider Class
 local Slider = UIElement:new({Type = "Slider"})
 function Section:Slider(props)
     local slider = Slider:new(props)
@@ -752,14 +707,13 @@ function Section:Slider(props)
     slider.Dragging = false
 
     slider.Position = {self.Position[1] + 5, self.Position[2] + self.ContentOffset}
-    slider.Size = {self.Size[1] - 10, 30} -- Slightly taller for slider bar
+    slider.Size = {self.Size[1] - 10, 30}
     slider.Color = {60, 60, 60}
     slider.Opacity = 1
     slider.ZIndex = self.ZIndex + 1
 
     self.ContentOffset = self.ContentOffset + slider.Size[2] + 5
 
-    -- Draw slider background
     slider.DrawingObjects.background = Drawing.new("Square")
     slider.DrawingObjects.background.Position = slider.Position
     slider.DrawingObjects.background.Size = slider.Size
@@ -768,7 +722,6 @@ function Section:Slider(props)
     slider.DrawingObjects.background.Filled = true
     slider.DrawingObjects.background.ZIndex = slider.ZIndex
 
-    -- Draw slider text
     slider.DrawingObjects.text = Drawing.new("Text")
     slider.DrawingObjects.text.Text = slider.Name .. ": " .. tostring(slider.Value) .. slider.Units
     slider.DrawingObjects.text.Position = {slider.Position[1] + 5, slider.Position[2] + 3}
@@ -776,7 +729,6 @@ function Section:Slider(props)
     slider.DrawingObjects.text.Size = 14
     slider.DrawingObjects.text.ZIndex = slider.ZIndex + 1
 
-    -- Draw slider bar
     slider.DrawingObjects.bar = Drawing.new("Square")
     slider.DrawingObjects.bar.Position = {slider.Position[1] + 5, slider.Position[2] + slider.Size[2] - 10}
     slider.DrawingObjects.bar.Size = {slider.Size[1] - 10, 5}
@@ -785,9 +737,8 @@ function Section:Slider(props)
     slider.DrawingObjects.bar.Filled = true
     slider.DrawingObjects.bar.ZIndex = slider.ZIndex + 1
 
-    -- Draw slider thumb
     slider.DrawingObjects.thumb = Drawing.new("Square")
-    slider.DrawingObjects.thumb.Position = {slider.Position[1] + 5 + (slider.Value - slider.Min) / (slider.Max - slider.Min) * (slider.Size[1] - 10 - 10), slider.Position[2] + slider.Size[2] - 13} -- -10 for thumb width
+    slider.DrawingObjects.thumb.Position = {slider.Position[1] + 5 + (slider.Value - slider.Min) / (slider.Max - slider.Min) * (slider.Size[1] - 10 - 10), slider.Position[2] + slider.Size[2] - 13}
     slider.DrawingObjects.thumb.Size = {10, 10}
     slider.DrawingObjects.thumb.Color = {0, 150, 255}
     slider.DrawingObjects.thumb.Opacity = 1
@@ -797,7 +748,6 @@ function Section:Slider(props)
     table.insert(self.Children, slider)
     slider:SetVisible(self.Visible)
 
-    -- Slider logic
     spawn(function()
         while true do
             local mouse_x, mouse_y = getmouseposition()
@@ -815,14 +765,13 @@ function Section:Slider(props)
                     local relative_x = mouse_x - bar_x
                     local percentage = math.max(0, math.min(1, relative_x / bar_w))
                     local new_value = slider.Min + percentage * (slider.Max - slider.Min)
-                    new_value = math.floor(new_value / slider.Increment) * slider.Increment -- Snap to increment
-                    new_value = math.max(slider.Min, math.min(slider.Max, new_value)) -- Clamp to min/max
+                    new_value = math.floor(new_value / slider.Increment) * slider.Increment
+                    new_value = math.max(slider.Min, math.min(slider.Max, new_value))
 
                     if new_value ~= slider.Value then
                         slider.Value = new_value
                         slider.DrawingObjects.text.Text = slider.Name .. ": " .. tostring(slider.Value) .. slider.Units
                         slider.Callback(slider.Value)
-                        -- Update thumb position
                         local thumb_x_pos = bar_x + percentage * (bar_w - slider.DrawingObjects.thumb.Size[1])
                         slider.DrawingObjects.thumb.Position = {thumb_x_pos, slider.DrawingObjects.thumb.Position[2]}
                     end
@@ -835,11 +784,8 @@ function Section:Slider(props)
     return slider
 end
 
--- Global UI rendering and input loop (main loop)
 spawn(function()
     while true do
-        -- This loop is primarily for handling global UI state like dragging
-        -- Individual element logic is handled in their own spawns
         wait()
     end
 end)
